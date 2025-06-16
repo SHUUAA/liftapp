@@ -535,7 +535,7 @@ export default function FinalExam() {
               {!imageError ? (
                 <img
                   ref={imageRef}
-                  src="/src/assets/document.jpeg" // Fixed path
+                  src={documentImage} // Fixed path
                   alt="Historical Document"
                   className="max-w-none shadow-lg select-none"
                   style={{
