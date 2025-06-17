@@ -88,6 +88,7 @@ export default function FinalExam() {
     };
   }, []);
 
+  // FIXED initializeAnnotation function
   const initializeAnnotation = async () => {
     try {
       // Get current user
@@ -95,13 +96,30 @@ export default function FinalExam() {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
+
       if (userError || !user) {
         navigate("/auth");
         return;
       }
 
       setUser(user);
-      const userId = user.user_metadata?.user_id || "unknown";
+
+      // Get user profile to get custom user_id
+      const { data: userProfile, error: profileError } = await supabase
+        .from("user_profiles")
+        .select("user_id")
+        .eq("auth_user_id", user.id)
+        .single();
+
+      if (profileError || !userProfile) {
+        console.error("User profile not found:", profileError);
+        navigate("/auth");
+        return;
+      }
+
+      const userId = userProfile.user_id; // Use custom user_id from profile
+
+      let currentAnnotationId = null;
 
       // Check for existing annotation
       const { data: existingAnnotation, error: fetchError } = await supabase
@@ -109,11 +127,13 @@ export default function FinalExam() {
         .select("*")
         .eq("auth_user_id", user.id)
         .eq("image_name", "004413935_00143")
-        .single();
+        .maybeSingle();
 
       if (existingAnnotation && !fetchError) {
         // Load existing annotation
-        setAnnotationId(existingAnnotation.id);
+        currentAnnotationId = existingAnnotation.id;
+        setAnnotationId(currentAnnotationId);
+
         setRecordData({
           image: existingAnnotation.image_name,
           langua: existingAnnotation.langua || "",
@@ -134,14 +154,16 @@ export default function FinalExam() {
           sp_given: existingAnnotation.sp_given || "",
           sp_surname: existingAnnotation.sp_surname || "",
         });
+
+        console.log("Loaded existing annotation:", currentAnnotationId);
       } else {
         // Create new annotation
         const { data: newAnnotation, error: createError } = await supabase
           .from("annotations")
           .insert([
             {
-              user_id: userId,
-              auth_user_id: user.id,
+              user_id: userId, // Custom user ID
+              auth_user_id: user.id, // Auth UUID for RLS
               image_name: "004413935_00143",
               status: "in_progress",
             },
@@ -151,31 +173,45 @@ export default function FinalExam() {
 
         if (createError) {
           console.error("Error creating annotation:", createError);
-        } else {
-          setAnnotationId(newAnnotation.id);
+          return;
         }
+
+        currentAnnotationId = newAnnotation.id;
+        setAnnotationId(currentAnnotationId);
+        console.log("Created new annotation:", currentAnnotationId);
       }
 
-      // Create new session
-      const { data: newSession, error: sessionError } = await supabase
-        .from("annotation_sessions")
-        .insert([
-          {
-            annotation_id: annotationId,
-            user_id: userId,
-            auth_user_id: user.id,
-            zoom_level: zoom,
-            pan_x: panX,
-            pan_y: panY,
-            contrast: contrast,
-            brightness: brightness,
-          },
-        ])
-        .select()
-        .single();
+      // NOW create session with the valid annotation ID
+      if (currentAnnotationId) {
+        const { data: newSession, error: sessionError } = await supabase
+          .from("annotation_sessions")
+          .insert([
+            {
+              annotation_id: currentAnnotationId, // ← Now this has a valid ID!
+              user_id: userId, // Custom user ID
+              auth_user_id: user.id, // Auth UUID for RLS
+              zoom_level: zoom,
+              pan_x: panX,
+              pan_y: panY,
+              contrast: contrast,
+              brightness: brightness,
+              started_at: new Date().toISOString(),
+            },
+          ])
+          .select()
+          .single();
 
-      if (!sessionError) {
-        setSessionId(newSession.id);
+        if (sessionError) {
+          console.error("Error creating session:", sessionError);
+        } else {
+          setSessionId(newSession.id);
+          console.log(
+            "Created session:",
+            newSession.id,
+            "for annotation:",
+            currentAnnotationId
+          );
+        }
       }
     } catch (error) {
       console.error("Error initializing annotation:", error);
