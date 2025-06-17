@@ -56,12 +56,12 @@ export default function FinalExam() {
   // Annotation data
   const [recordData, setRecordData] = useState({
     image: "004413935_00143",
-    langua: "es",
-    event_d: "30",
+    langua: "",
+    event_d: "",
     event: "",
-    event_y: "1908",
-    given: "Modesto",
-    surname: "Claveria",
+    event_y: "",
+    given: "",
+    surname: "",
     sex: "",
     age: "",
     death_d: "",
