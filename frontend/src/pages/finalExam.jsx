@@ -51,6 +51,7 @@ export default function FinalExam() {
     ignoreCase: false,
     toolTip: false,
     onlyOneColumn: false,
+    specialCharacters: false,
   });
 
   // Annotation data
@@ -74,6 +75,46 @@ export default function FinalExam() {
     sp_given: "",
     sp_surname: "",
   });
+
+  const specialCharMap = {
+    a: "á", A: "Á",
+    e: "é", E: "É",
+    i: "í", I: "Í",
+    o: "ó", O: "Ó",
+    u: "ú", U: "Ú",
+    n: "ñ", N: "Ñ",
+    c: "ç", C: "Ç",
+    ü: "ü", Ü: "Ü"
+  };
+
+  const handleSpecialCharInput = (e, field) => {
+    if (
+      toolbarState.specialCharacters &&
+      e.ctrlKey &&
+      e.altKey &&
+      !e.metaKey &&
+      specialCharMap[e.key]
+    ) {
+      e.preventDefault();
+
+      const input = e.target;
+      const cursorPos = input.selectionStart;
+      const before = input.value.slice(0, cursorPos);
+      const after = input.value.slice(cursorPos);
+      const newChar = specialCharMap[e.key];
+
+      const newValue = before + newChar + after;
+
+      setRecordData((prev) => ({
+        ...prev,
+        [field]: newValue,
+      }));
+
+      setTimeout(() => {
+        input.selectionStart = input.selectionEnd = cursorPos + 1;
+      }, 0);
+    }
+  };  
 
   // Initialize user and load existing annotation
   useEffect(() => {
@@ -469,6 +510,16 @@ export default function FinalExam() {
                 />
                 <span>First Char Capslock</span>
               </label>
+
+              <label className="flex items-center space-x-1">
+                <input
+                  type="checkbox"
+                  checked={toolbarState.specialCharacters}
+                  onChange={() => toggleToolbar("specialCharacters")}
+                  className="w-4 h-4"
+                />
+                <span>Special Characters</span>
+              </label>
             </div>
           </div>
 
@@ -577,82 +628,76 @@ export default function FinalExam() {
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          <div className="p-4 flex justify-center items-center h-full">
-            {/* Document Image */}
-            <div
-              className="relative"
-              style={{
-                transform: `translate(${panX}px, ${panY}px)`,
-              }}
-            >
-              {!imageError ? (
-                <img
-                  ref={imageRef}
-                  src={documentImage} // Fixed path
-                  alt="Historical Document"
-                  className="max-w-none shadow-lg select-none"
-                  style={{
-                    filter: `contrast(${contrast + 50}%) brightness(${
-                      brightness + 50
-                    }%)`,
-                    transform: `scale(${zoom / 100})`,
-                    transformOrigin: "center center",
-                  }}
-                  onError={() => setImageError(true)}
-                  draggable={false}
-                />
-              ) : (
-                <div
-                  className="bg-gray-50 border-2 border-dashed border-gray-300 p-8 text-center"
-                  style={{ width: "600px", height: "800px" }}
-                >
-                  <div className="flex flex-col items-center justify-center h-full">
-                    <div className="text-gray-500 mb-4">
-                      <svg
-                        className="w-16 h-16 mx-auto"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                        ></path>
-                      </svg>
-                    </div>
-                    <p className="text-gray-600 text-lg">Document Image</p>
-                    <p className="text-gray-500 text-sm">
-                      Place your image in /src/assets/document.jpeg
-                    </p>
-                    <button
-                      onClick={() => setImageError(false)}
-                      className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                    >
-                      Retry Loading Image
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Guide Line Overlay */}
-              {toolbarState.guideLine && (
-                <div className="absolute left-0 top-1/2 h-px w-full bg-green-300 opacity-70 pointer-events-none"></div>
+          <div className="relative w-full h-full">
+            {toolbarState.guideLine && (
+              <div className="absolute top-1/2 left-0 w-full h-0.5 bg-green-500 opacity-70 pointer-events-none z-10"></div>
             )}
 
-
-              {/* Zone Box Overlay */}
-              {toolbarState.zoneBox && (
-                <div className="absolute inset-0 border-2 border-red-500 opacity-50 pointer-events-none"></div>
-              )}
+            <div
+              className="absolute top-0 left-0 w-full h-full"
+              style={{ transform: `translate(${panX}px, ${panY}px)` }}
+            >
+              <div
+                style={{
+                  transform: `scale(${zoom / 100})`,
+                  transformOrigin: "center center",
+                  position: "relative",
+                }}
+              >
+                {!imageError ? (
+                  <img
+                    ref={imageRef}
+                    src={documentImage}
+                    alt="Historical Document"
+                    className="max-w-none shadow-lg select-none"
+                    style={{
+                      filter: `contrast(${contrast + 50}%) brightness(${brightness + 50}%)`,
+                    }}
+                    onError={() => setImageError(true)}
+                    draggable={false}
+                  />
+                ) : (
+                  <div
+                    className="bg-gray-50 border-2 border-dashed border-gray-300 p-8 text-center"
+                    style={{ width: "600px", height: "800px" }}
+                  >
+                    <div className="flex flex-col items-center justify-center h-full">
+                      <div className="text-gray-500 mb-4">
+                        <svg
+                          className="w-16 h-16 mx-auto"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                          />
+                        </svg>
+                      </div>
+                      <p className="text-gray-600 text-lg">Document Image</p>
+                      <p className="text-gray-500 text-sm">
+                        Place your image in /src/assets/document.jpeg
+                      </p>
+                      <button
+                        onClick={() => setImageError(false)}
+                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                      >
+                        Retry Loading Image
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Pan Instructions */}
-            <div className="absolute top-4 left-4 bg-black bg-opacity-50 text-white p-2 rounded text-sm">
+            <div className="absolute top-4 left-4 bg-black bg-opacity-50 text-white p-2 rounded text-sm z-20">
               Click and drag to move image
             </div>
           </div>
+
         </div>
       </div>
 
@@ -764,10 +809,9 @@ export default function FinalExam() {
                       type="text"
                       value={value}
                       onChange={(e) => handleInputChange(key, e.target.value)}
+                      onKeyDown={(e) => handleSpecialCharInput(e, key)}
                       className="w-full bg-transparent text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      placeholder={
-                        key === "image" ? "Image ID" : `Enter ${key}`
-                      }
+                      placeholder={key === "image" ? "Image ID" : `Enter ${key}`}
                     />
                   </td>
                 ))}
