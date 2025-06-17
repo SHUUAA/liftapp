@@ -39,7 +39,7 @@ export default function FinalExam() {
   // Toolbar state
   const [toolbarState, setToolbarState] = useState({
     verticalMode: false,
-    guideLine: true,
+    guideLine: false,
     zoneBox: false,
     topZone: false,
     moveByCell: false,
@@ -335,9 +335,16 @@ export default function FinalExam() {
   };
 
   const handleInputChange = (field, value) => {
+    let newValue = value;
+
+  // Apply firstCharCapsLock only if enabled
+  if (toolbarState.firstCharCapsLock && typeof value === "string" && value.length > 0) {
+    newValue = value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
     setRecordData((prev) => ({
       ...prev,
-      [field]: value,
+      [field]: newValue,
     }));
   };
 
@@ -451,6 +458,16 @@ export default function FinalExam() {
                   className="w-4 h-4"
                 />
                 <span>Zone Box</span>
+              </label>
+
+              <label className="flex items-center space-x-1">
+                <input
+                  type="checkbox"
+                  checked={toolbarState.firstCharCapsLock}
+                  onChange={() => toggleToolbar("firstCharCapsLock")}
+                  className="w-4 h-4"
+                />
+                <span>First Char Capslock</span>
               </label>
             </div>
           </div>
@@ -621,8 +638,9 @@ export default function FinalExam() {
 
               {/* Guide Line Overlay */}
               {toolbarState.guideLine && (
-                <div className="absolute top-0 left-1/2 w-px h-full bg-blue-500 opacity-50 pointer-events-none"></div>
-              )}
+                <div className="absolute left-0 top-1/2 h-px w-full bg-green-300 opacity-70 pointer-events-none"></div>
+            )}
+
 
               {/* Zone Box Overlay */}
               {toolbarState.zoneBox && (
