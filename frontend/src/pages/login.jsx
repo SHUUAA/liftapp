@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 export default function Login({ onSwitchToRegister }) {
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,9 +28,45 @@ export default function Login({ onSwitchToRegister }) {
 
       if (error) throw error;
 
-      if (data?.session) {
-        setMessage("Login successful! Redirecting...");
+      if (data?.session && data?.user) {
+        setMessage("Login successful! Checking user role...");
         console.log("Login successful:", data.user.email);
+
+        // Check user role to determine redirect
+        try {
+          const { data: profile, error: profileError } = await supabase
+            .from("user_profiles")
+            .select("role, user_id, full_name")
+            .eq("auth_user_id", data.user.id)
+            .single();
+
+          if (profileError) {
+            console.warn("Could not fetch user profile:", profileError);
+            // If we can't get the profile, redirect to home (default behavior)
+            setMessage("Login successful! Redirecting to dashboard...");
+            setTimeout(() => navigate("/"), 1000);
+            return;
+          }
+
+          if (profile?.role === "admin") {
+            setMessage(
+              `Welcome back, Admin ${profile.user_id}! Redirecting to admin dashboard...`
+            );
+            console.log("Admin user detected, redirecting to admin dashboard");
+            setTimeout(() => navigate("/admin"), 1000);
+          } else {
+            setMessage(
+              `Welcome back, ${profile.user_id}! Redirecting to dashboard...`
+            );
+            console.log("Regular user, redirecting to home");
+            setTimeout(() => navigate("/"), 1000);
+          }
+        } catch (profileError) {
+          console.error("Error checking user role:", profileError);
+          // Default to home page if role check fails
+          setMessage("Login successful! Redirecting...");
+          setTimeout(() => navigate("/"), 1000);
+        }
       }
     } catch (error) {
       console.error("Login error:", error);
@@ -200,6 +238,14 @@ export default function Login({ onSwitchToRegister }) {
             <li>• Verify your email and password are correct</li>
             <li>• Look at the browser console for detailed logs</li>
           </ul>
+        </div>
+
+        {/* Admin Info */}
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-xs text-blue-800">
+            <strong>Note:</strong> Admin users will be automatically redirected
+            to the admin dashboard upon login.
+          </p>
         </div>
       </div>
     </div>

@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 export default function NavBar({ user }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -51,6 +54,9 @@ export default function NavBar({ user }) {
     await supabase.auth.signOut();
   };
 
+  const isAdmin = userProfile?.role === "admin";
+  const isOnAdminPage = location.pathname === "/admin";
+
   if (loading) {
     return (
       <header className="bg-white shadow-sm border-b">
@@ -74,10 +80,27 @@ export default function NavBar({ user }) {
     <header className="bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center py-4">
-          <h1 className="text-2xl font-bold text-gray-900">
-            📝 Data Annotation Platform
-          </h1>
+          {/* Logo/Title with click to home */}
           <div className="flex items-center space-x-4">
+            <button
+              onClick={() => navigate("/")}
+              className="text-2xl font-bold text-gray-900 hover:text-blue-600 transition-colors"
+            >
+              {isAdmin ? "🛠️ Admin Dashboard" : "📝 Data Annotation Platform"}
+            </button>
+          </div>
+
+          <div className="flex items-center space-x-4">
+            {/* Admin Panel Button - only show if admin and not on admin page */}
+            {isAdmin && !isOnAdminPage && (
+              <button
+                onClick={() => navigate("/admin")}
+                className="px-3 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors text-sm font-medium"
+              >
+                🛠️ Admin Panel
+              </button>
+            )}
+
             {/* Enhanced User Info with User ID */}
             <div className="text-right">
               <div className="text-sm text-gray-700">
@@ -96,6 +119,8 @@ export default function NavBar({ user }) {
               className={`px-2 py-1 text-xs rounded-full ${
                 userProfile?.role === "admin"
                   ? "bg-red-100 text-red-800"
+                  : userProfile?.role === "instructor"
+                  ? "bg-purple-100 text-purple-800"
                   : "bg-blue-100 text-blue-800"
               }`}
             >
