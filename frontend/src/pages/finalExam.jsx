@@ -77,14 +77,22 @@ export default function FinalExam() {
   });
 
   const specialCharMap = {
-    a: "á", A: "Á",
-    e: "é", E: "É",
-    i: "í", I: "Í",
-    o: "ó", O: "Ó",
-    u: "ú", U: "Ú",
-    n: "ñ", N: "Ñ",
-    c: "ç", C: "Ç",
-    ü: "ü", Ü: "Ü"
+    a: "á",
+    A: "Á",
+    e: "é",
+    E: "É",
+    i: "í",
+    I: "Í",
+    o: "ó",
+    O: "Ó",
+    u: "ú",
+    U: "Ú",
+    n: "ñ",
+    N: "Ñ",
+    c: "ç",
+    C: "Ç",
+    ü: "ü",
+    Ü: "Ü",
   };
 
   const handleSpecialCharInput = (e, field) => {
@@ -114,7 +122,7 @@ export default function FinalExam() {
         input.selectionStart = input.selectionEnd = cursorPos + 1;
       }, 0);
     }
-  };  
+  };
 
   // Initialize user and load existing annotation
   useEffect(() => {
@@ -378,10 +386,14 @@ export default function FinalExam() {
   const handleInputChange = (field, value) => {
     let newValue = value;
 
-  // Apply firstCharCapsLock only if enabled
-  if (toolbarState.firstCharCapsLock && typeof value === "string" && value.length > 0) {
-    newValue = value.charAt(0).toUpperCase() + value.slice(1);
-  }
+    // Apply firstCharCapsLock only if enabled
+    if (
+      toolbarState.firstCharCapsLock &&
+      typeof value === "string" &&
+      value.length > 0
+    ) {
+      newValue = value.charAt(0).toUpperCase() + value.slice(1);
+    }
 
     setRecordData((prev) => ({
       ...prev,
@@ -651,7 +663,9 @@ export default function FinalExam() {
                     alt="Historical Document"
                     className="max-w-none shadow-lg select-none"
                     style={{
-                      filter: `contrast(${contrast + 50}%) brightness(${brightness + 50}%)`,
+                      filter: `contrast(${contrast + 50}%) brightness(${
+                        brightness + 50
+                      }%)`,
                     }}
                     onError={() => setImageError(true)}
                     draggable={false}
@@ -692,12 +706,7 @@ export default function FinalExam() {
                 )}
               </div>
             </div>
-
-            <div className="absolute top-4 left-4 bg-black bg-opacity-50 text-white p-2 rounded text-sm z-20">
-              Click and drag to move image
-            </div>
           </div>
-
         </div>
       </div>
 
@@ -811,7 +820,9 @@ export default function FinalExam() {
                       onChange={(e) => handleInputChange(key, e.target.value)}
                       onKeyDown={(e) => handleSpecialCharInput(e, key)}
                       className="w-full bg-transparent text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      placeholder={key === "image" ? "Image ID" : `Enter ${key}`}
+                      placeholder={
+                        key === "image" ? "Image ID" : `Enter ${key}`
+                      }
                     />
                   </td>
                 ))}
