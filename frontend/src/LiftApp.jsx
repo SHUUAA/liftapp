@@ -1,17 +1,20 @@
+// src/LiftApp.jsx
 import React, { useState, useRef, useEffect } from 'react';
 import HomePage from './components/HomePage';
+import ExamSelection from './components/ExamSelection';
 import AnnotationInterface from './components/AnnotationInterface';
 import { useDatabase } from './hooks/useDatabase';
 import { fields, sampleImageUrl, initialTableRow } from './utils/constants';
 
 const LiftApp = () => {
-  const [currentView, setCurrentView] = useState('home');
+  const [currentView, setCurrentView] = useState('home'); // 'home', 'examSelection', 'baptism', 'marriage'
   const [userId, setUserId] = useState('');
   const [currentSession, setCurrentSession] = useState(null);
   const [tableData, setTableData] = useState([initialTableRow]);
   const [activeRow, setActiveRow] = useState(0);
   const [currentField, setCurrentField] = useState('');
   const [progress, setProgress] = useState(0);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
   
   // Toolbar states
   const [guideLine, setGuideLine] = useState(false);
@@ -46,6 +49,24 @@ const LiftApp = () => {
       updateSessionProgress(currentSession.id, newProgress);
     }
   }, [tableData, currentSession?.id]);
+
+  // Access platform handler
+  const handleAccessPlatform = () => {
+    if (!userId.trim()) return;
+    setCurrentView('examSelection');
+    setShowSuccessToast(true);
+    // Hide toast after 5 seconds
+    setTimeout(() => setShowSuccessToast(false), 5000);
+  };
+
+  // Logout handler
+  const handleLogout = () => {
+    setCurrentView('home');
+    setUserId('');
+    setCurrentSession(null);
+    setTableData([initialTableRow]);
+    setProgress(0);
+  };
 
   // Event handlers
   const handleInputChange = (rowIndex, field, value) => {
@@ -95,6 +116,7 @@ const LiftApp = () => {
     const newRow = {
       id: Date.now(),
       ...initialTableRow,
+      id: Date.now()
     };
     
     setTableData(prev => [
@@ -128,7 +150,7 @@ const LiftApp = () => {
         const submitted = await submitSession(currentSession.id);
         if (submitted) {
           alert('Session submitted successfully!');
-          setCurrentView('home');
+          setCurrentView('examSelection');
           setCurrentSession(null);
           setTableData([initialTableRow]);
         } else {
@@ -139,8 +161,6 @@ const LiftApp = () => {
   };
 
   const startExam = async (examType) => {
-    if (!userId.trim()) return;
-    
     await createUser(userId);
     const session = await createSession(userId, examType);
     if (session) {
@@ -158,14 +178,25 @@ const LiftApp = () => {
           userId={userId}
           setUserId={setUserId}
           connectionStatus={connectionStatus}
-          startExam={startExam}
+          onAccessPlatform={handleAccessPlatform}
         />
       )}
+      
+      {currentView === 'examSelection' && (
+        <ExamSelection
+          userId={userId}
+          startExam={startExam}
+          onLogout={handleLogout}
+          showSuccessToast={showSuccessToast}
+          setShowSuccessToast={setShowSuccessToast}
+        />
+      )}
+      
       {(currentView === 'baptism' || currentView === 'marriage') && (
         <AnnotationInterface
+          userId={userId}
           setCurrentView={setCurrentView}
           setCurrentSession={setCurrentSession}
-          connectionStatus={connectionStatus}
           progress={progress}
           handleSubmit={handleSubmit}
           guideLine={guideLine}

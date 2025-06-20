@@ -11,7 +11,6 @@ const DataTable = ({
   handleKeyDown,
   setCurrentField,
   deleteRow,
-  addNewRow,
   currentSession,
   currentView
 }) => {
@@ -73,13 +72,6 @@ const DataTable = ({
       </div>
       
       <div className="mt-4 flex justify-between items-center">
-        <button
-          onClick={() => addNewRow()}
-          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-        >
-          Add Row
-        </button>
-        
         <div className="flex items-center space-x-4">
           <div className="text-sm text-gray-600">
             Session: {currentSession?.id || 'None'}
