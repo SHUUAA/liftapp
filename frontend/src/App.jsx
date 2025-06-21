@@ -1,7 +1,7 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import LiftApp from "./LiftApp.jsx";
-import AdminPanel from "./pages/AdminPanel.jsx";
+import AdminPanel from "./pages/AdminDashboard.jsx";
 
 function App() {
   return (

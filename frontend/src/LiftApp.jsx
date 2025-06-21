@@ -1,21 +1,21 @@
 // src/LiftApp.jsx
-import React, { useState, useRef, useEffect } from 'react';
-import HomePage from './components/HomePage';
-import ExamSelection from './components/ExamSelection';
-import AnnotationInterface from './components/AnnotationInterface';
-import { useDatabase } from './hooks/useDatabase';
-import { fields, sampleImageUrl, initialTableRow } from './utils/constants';
+import React, { useState, useRef, useEffect } from "react";
+import HomePage from "./components/HomePage";
+import ExamSelection from "./components/ExamSelection";
+import AnnotationInterface from "./components/AnnotationInterface";
+import { useDatabase } from "./hooks/useDatabase";
+import { fields, sampleImageUrl, initialTableRow } from "./utils/constants";
 
 const LiftApp = () => {
-  const [currentView, setCurrentView] = useState('home'); // 'home', 'examSelection', 'baptism', 'marriage'
-  const [userId, setUserId] = useState('');
+  const [currentView, setCurrentView] = useState("home"); // 'home', 'examSelection', 'baptism', 'marriage'
+  const [userId, setUserId] = useState("");
   const [currentSession, setCurrentSession] = useState(null);
   const [tableData, setTableData] = useState([initialTableRow]);
   const [activeRow, setActiveRow] = useState(0);
-  const [currentField, setCurrentField] = useState('');
+  const [currentField, setCurrentField] = useState("");
   const [progress, setProgress] = useState(0);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
-  
+
   // Toolbar states
   const [guideLine, setGuideLine] = useState(false);
   const [firstCharCapslock, setFirstCharCapslock] = useState(false);
@@ -23,28 +23,34 @@ const LiftApp = () => {
   const [contrast, setContrast] = useState(50);
   const [brightness, setBrightness] = useState(50);
   const [zoom, setZoom] = useState(100);
-  
+
   const imageRef = useRef(null);
   const fieldRefs = useRef({});
-  
+
   const {
     connectionStatus,
     createUser,
     createSession,
     saveAnnotations,
     updateSessionProgress,
-    submitSession
+    submitSession,
   } = useDatabase();
 
   // Calculate progress
   useEffect(() => {
     const totalFields = tableData.length * (fields.length - 1);
     const filledFields = tableData.reduce((count, row) => {
-      return count + fields.slice(1).filter(field => row[field.key] && row[field.key].trim() !== '').length;
+      return (
+        count +
+        fields
+          .slice(1)
+          .filter((field) => row[field.key] && row[field.key].trim() !== "")
+          .length
+      );
     }, 0);
     const newProgress = Math.round((filledFields / totalFields) * 100);
     setProgress(newProgress);
-    
+
     if (currentSession?.id) {
       updateSessionProgress(currentSession.id, newProgress);
     }
@@ -53,7 +59,7 @@ const LiftApp = () => {
   // Access platform handler
   const handleAccessPlatform = () => {
     if (!userId.trim()) return;
-    setCurrentView('examSelection');
+    setCurrentView("examSelection");
     setShowSuccessToast(true);
     // Hide toast after 5 seconds
     setTimeout(() => setShowSuccessToast(false), 5000);
@@ -61,8 +67,8 @@ const LiftApp = () => {
 
   // Logout handler
   const handleLogout = () => {
-    setCurrentView('home');
-    setUserId('');
+    setCurrentView("home");
+    setUserId("");
     setCurrentSession(null);
     setTableData([initialTableRow]);
     setProgress(0);
@@ -73,12 +79,12 @@ const LiftApp = () => {
     let processedValue = value;
     if (firstCharCapslock && value.length === 1) {
       const currentValue = tableData[rowIndex][field];
-      if (currentValue === '') {
+      if (currentValue === "") {
         processedValue = value.toUpperCase();
       }
     }
 
-    setTableData(prev => {
+    setTableData((prev) => {
       const updated = [...prev];
       updated[rowIndex] = { ...updated[rowIndex], [field]: processedValue };
       return updated;
@@ -88,25 +94,36 @@ const LiftApp = () => {
   const handleKeyDown = (e, rowIndex, fieldIndex) => {
     if (specialCharacters && e.ctrlKey && e.altKey) {
       const charMap = {
-        'a': 'á', 'A': 'Á', 'e': 'é', 'E': 'É', 'i': 'í', 'I': 'Í',
-        'o': 'ó', 'O': 'Ó', 'u': 'ú', 'U': 'Ú', 'n': 'ñ', 'N': 'Ñ',
-        'c': 'ç', 'C': 'Ç'
+        a: "á",
+        A: "Á",
+        e: "é",
+        E: "É",
+        i: "í",
+        I: "Í",
+        o: "ó",
+        O: "Ó",
+        u: "ú",
+        U: "Ú",
+        n: "ñ",
+        N: "Ñ",
+        c: "ç",
+        C: "Ç",
       };
-      
+
       if (charMap[e.key]) {
         e.preventDefault();
         const field = fields[fieldIndex].key;
-        setTableData(prev => {
+        setTableData((prev) => {
           const currentValue = prev[rowIndex][field];
           const newValue = currentValue + charMap[e.key];
-          return prev.map((row, index) => 
+          return prev.map((row, index) =>
             index === rowIndex ? { ...row, [field]: newValue } : row
           );
         });
       }
     }
-    
-    if (e.key === 'Tab' && fieldIndex === fields.length - 1) {
+
+    if (e.key === "Tab" && fieldIndex === fields.length - 1) {
       e.preventDefault();
       addNewRow(rowIndex + 1);
     }
@@ -116,20 +133,19 @@ const LiftApp = () => {
     const newRow = {
       id: Date.now(),
       ...initialTableRow,
-      id: Date.now()
     };
-    
-    setTableData(prev => [
+
+    setTableData((prev) => [
       ...prev.slice(0, insertIndex),
       newRow,
-      ...prev.slice(insertIndex)
+      ...prev.slice(insertIndex),
     ]);
     setActiveRow(insertIndex);
   };
 
   const deleteRow = (rowIndex) => {
     if (tableData.length > 1) {
-      setTableData(prev => prev.filter((_, index) => index !== rowIndex));
+      setTableData((prev) => prev.filter((_, index) => index !== rowIndex));
       if (activeRow >= tableData.length - 1) {
         setActiveRow(0);
       }
@@ -139,7 +155,7 @@ const LiftApp = () => {
   const resetZoom = () => {
     setZoom(100);
     if (imageRef.current) {
-      imageRef.current.style.transform = 'translate(0, 0)';
+      imageRef.current.style.transform = "translate(0, 0)";
     }
   };
 
@@ -149,12 +165,12 @@ const LiftApp = () => {
       if (saved) {
         const submitted = await submitSession(currentSession.id);
         if (submitted) {
-          alert('Session submitted successfully!');
-          setCurrentView('examSelection');
+          alert("Session submitted successfully!");
+          setCurrentView("examSelection");
           setCurrentSession(null);
           setTableData([initialTableRow]);
         } else {
-          alert('Failed to submit session. Please try again.');
+          alert("Failed to submit session. Please try again.");
         }
       }
     }
@@ -167,13 +183,13 @@ const LiftApp = () => {
       setCurrentSession(session);
       setCurrentView(examType);
     } else {
-      alert('Failed to create session. Please try again.');
+      alert("Failed to create session. Please try again.");
     }
   };
 
   return (
     <div className="App">
-      {currentView === 'home' && (
+      {currentView === "home" && (
         <HomePage
           userId={userId}
           setUserId={setUserId}
@@ -181,8 +197,8 @@ const LiftApp = () => {
           onAccessPlatform={handleAccessPlatform}
         />
       )}
-      
-      {currentView === 'examSelection' && (
+
+      {currentView === "examSelection" && (
         <ExamSelection
           userId={userId}
           startExam={startExam}
@@ -191,8 +207,8 @@ const LiftApp = () => {
           setShowSuccessToast={setShowSuccessToast}
         />
       )}
-      
-      {(currentView === 'baptism' || currentView === 'marriage') && (
+
+      {(currentView === "baptism" || currentView === "marriage") && (
         <AnnotationInterface
           userId={userId}
           setCurrentView={setCurrentView}

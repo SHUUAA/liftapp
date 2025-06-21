@@ -1,7 +1,7 @@
 import React from "react";
 import { useAdminAuth } from "../hooks/useAdminAuth";
-import AdminLogin from "./AdminLogin";
-import AdminDashboard from "./AdminDashboard";
+import AdminLogin from "../components/AdminLogin";
+import AdminDashboard from "../components/AdminDashboard";
 
 const AdminPanel = () => {
   const { isAuthenticated, loading } = useAdminAuth();
