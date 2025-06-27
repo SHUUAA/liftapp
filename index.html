@@ -1,87 +1,100 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LiftApp - Annotation Platform</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      /* Custom scrollbar for a more polished look - optional */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f1f1;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #555;
-      }
-      .table-container {
-        max-height: calc(
-          100vh - 450px
-        ); /* Adjust based on other elements' heights */
-        overflow-y: auto;
-      }
-      .table-responsive {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
-      }
-      input[type="range"] {
-        -webkit-appearance: none;
-        appearance: none;
-        background: transparent;
-        cursor: pointer;
-      }
-      input[type="range"]::-webkit-slider-runnable-track {
-        background: #e5e7eb; /* bg-gray-200 */
-        height: 0.25rem; /* h-1 */
-        border-radius: 0.25rem; /* rounded-full */
-      }
-      input[type="range"]::-moz-range-track {
-        background: #e5e7eb;
-        height: 0.25rem;
-        border-radius: 0.25rem;
-      }
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        margin-top: -6px; /* Adjust to center thumb on track */
-        background-color: #3b82f6; /* bg-blue-500 */
-        height: 1rem; /* h-4 */
-        width: 1rem; /* w-4 */
-        border-radius: 9999px; /* rounded-full */
-        border: 2px solid white;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      }
-      input[type="range"]::-moz-range-thumb {
-        background-color: #3b82f6;
-        height: 1rem;
-        width: 1rem;
-        border-radius: 9999px;
-        border: 2px solid white;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      }
-    </style>
-    <!-- Environment variables are now handled via Vite's .env files and import.meta.env in your code. -->
-    <script type="importmap">
-      {
-        "imports": {
-          "react/": "https://esm.sh/react@^19.1.0/",
-          "react": "https://esm.sh/react@^19.1.0",
-          "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
-          "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
-        }
-      }
-    </script>
-    <link rel="stylesheet" href="/index.css" />
-  </head>
-  <body class="bg-slate-200 text-slate-800">
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiftApp - Annotation Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Custom scrollbar for a more polished look - optional */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #555;
+    }
+    .table-container {
+      max-height: calc(100vh - 450px); /* Adjust based on other elements' heights */
+      overflow-y: auto;
+    }
+    .table-responsive {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      background: #e5e7eb; /* bg-gray-200 */
+      height: 0.25rem; /* h-1 */
+      border-radius: 0.25rem; /* rounded-full */
+    }
+    input[type="range"]::-moz-range-track {
+      background: #e5e7eb;
+      height: 0.25rem;
+      border-radius: 0.25rem;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      margin-top: -6px; /* Adjust to center thumb on track */
+      background-color: #3b82f6; /* bg-blue-500 */
+      height: 1rem; /* h-4 */
+      width: 1rem; /* w-4 */
+      border-radius: 9999px; /* rounded-full */
+      border: 2px solid white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    input[type="range"]::-moz-range-thumb {
+      background-color: #3b82f6;
+      height: 1rem;
+      width: 1rem;
+      border-radius: 9999px;
+      border: 2px solid white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+  </style>
+<script>
+  // Define environment variables on window.process.env
+  // This makes them accessible to client-side scripts like supabaseClient.ts
+  window.process = {
+    env: {
+      NEXT_PUBLIC_SUPABASE_URL: "https://nymdxiwkpjnczwjlcyvq.supabase.co",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55bWR4aXdrcGpuY3p3amxjeXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA0NzUxODIsImV4cCI6MjA2NjA1MTE4Mn0.d6tmbjr0SEAVG_c_Rm08V8M4Ob5nNurCsa-JORRmNkA",
+      // IMPORTANT: In a real deployment, this placeholder value ("YOUR_...")
+      // for API_KEY should be replaced by your actual environment variable,
+      // typically during a build process or via server-side templating.
+      // DO NOT COMMIT ACTUAL SECRET KEYS TO YOUR VERSION CONTROL.
+      API_KEY: "YOUR_GEMINI_API_KEY_FROM_ENV" // Replace with actual Gemini API Key (or other general API Key) if needed
+    }
+  };
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-slate-200 text-slate-800">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>

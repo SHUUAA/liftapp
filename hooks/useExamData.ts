@@ -1,10 +1,10 @@
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Exam, AnnotationRowData, AnnotationCellData, ImageTask, DisplayStatusType } from '../types';
 import { supabase } from '../utils/supabase/client';
 import { formatSupabaseError } from '../utils/errorUtils';
 import { loadAnnotationsFromLocalStorage, saveAnnotationsToLocalStorage, removeAnnotationsFromLocalStorage } from '../utils/localStorageUtils';
-import { ANNOTATION_TABLE_COLUMNS, STORAGE_BUCKET_NAME } from '../constants';
+import { getColumnsForExam, STORAGE_BUCKET_NAME } from '../constants';
 import { generateRowId } from '../utils/examUtils';
 
 interface UseExamDataProps {
@@ -27,10 +27,11 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
 
   const [currentExamDbId, setCurrentExamDbId] = useState<number | null>(exam.dbId || null);
 
+  const columnsForCurrentExam = useMemo(() => getColumnsForExam(exam.id), [exam.id]);
 
   const initializeNewRowsForImage = useCallback((imageTask?: ImageTask): AnnotationRowData[] => {
     const initialCells: AnnotationCellData = {};
-    ANNOTATION_TABLE_COLUMNS.forEach(col => initialCells[col.id] = '');
+    columnsForCurrentExam.forEach(col => initialCells[col.id] = '');
     
     const currentTaskToUse = imageTask || (allImageTasks.length > 0 && currentImageTaskIndex !== -1 && allImageTasks[currentImageTaskIndex]) || undefined;
 
@@ -40,7 +41,7 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
       initialCells['image_ref'] = `doc_${exam.id}_default`;
     }
     return [{ id: generateRowId(), cells: initialCells }];
-  }, [allImageTasks, currentImageTaskIndex, exam.id]);
+  }, [allImageTasks, currentImageTaskIndex, exam.id, columnsForCurrentExam]);
   
   const updateRowsAndSignalChange = useCallback((newRows: AnnotationRowData[] | ((prevRows: AnnotationRowData[]) => AnnotationRowData[])) => {
     setRows(newRows);

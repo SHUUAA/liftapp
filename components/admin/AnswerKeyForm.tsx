@@ -1,52 +1,56 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Exam, AnnotationColumn, AnnotationRowData, AnswerKeyEntry } from '../../types';
 import { generateRowId } from '../../utils/examUtils'; // Using the centralized helper
+import { getColumnsForExam } from '../../constants';
 
 interface AnswerKeyFormProps {
   exams: Exam[];
-  columns: AnnotationColumn[];
   onSave: (answerKey: AnswerKeyEntry) => void;
   onCancel: () => void;
   initialData?: AnswerKeyEntry | null;
   defaultExamId?: string; // New optional prop
 }
 
-const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, columns, onSave, onCancel, initialData, defaultExamId }) => {
+const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, onSave, onCancel, initialData, defaultExamId }) => {
   const [selectedExamId, setSelectedExamId] = useState<string>(() => {
     if (initialData?.examId) return initialData.examId;
     if (defaultExamId) return defaultExamId;
     return exams.length > 0 ? exams[0].id : '';
   });
+
+  const columns = useMemo(() => getColumnsForExam(selectedExamId), [selectedExamId]);
+
   const [imageId, setImageId] = useState<string>(initialData?.imageId || ''); 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(initialData?.imageUrl || null);
 
-  const [answerRows, setAnswerRows] = useState<AnnotationRowData[]>(() => {
-    if (initialData && initialData.answers.length > 0) {
-      return initialData.answers;
+  const [answerRows, setAnswerRows] = useState<AnnotationRowData[]>([]);
+
+  useEffect(() => {
+    if (initialData && initialData.examId === selectedExamId) {
+      setAnswerRows(initialData.answers.length > 0 ? initialData.answers : [{ id: generateRowId(), cells: columns.reduce((acc, col) => ({...acc, [col.id]: ''}), {}) }]);
+    } else {
+      setAnswerRows([{ id: generateRowId(), cells: columns.reduce((acc, col) => ({...acc, [col.id]: ''}), {}) }]);
     }
-    const initialCells: { [key: string]: string } = {};
-    columns.forEach(col => initialCells[col.id] = '');
-    return [{ id: generateRowId(), cells: initialCells }];
-  });
+  }, [initialData, columns, selectedExamId]);
+
 
   useEffect(() => {
     if (initialData) {
       setSelectedExamId(initialData.examId);
       setImageId(initialData.imageId); 
-      setAnswerRows(initialData.answers.length > 0 ? initialData.answers : [{ id: generateRowId(), cells: columns.reduce((acc, col) => ({...acc, [col.id]: ''}), {}) }]);
+      // answerRows are handled by the effect above
       setImageFile(null); 
       setPreviewImageUrl(initialData.imageUrl || null);
     } else {
       // Use defaultExamId if provided for new entries, otherwise first exam
       setSelectedExamId(defaultExamId || (exams.length > 0 ? exams[0].id : ''));
       setImageId('');
-      setAnswerRows([{ id: generateRowId(), cells: columns.reduce((acc, col) => ({...acc, [col.id]: ''}), {}) }]);
       setImageFile(null);
       setPreviewImageUrl(null);
     }
-  }, [initialData, exams, columns, defaultExamId]);
+  }, [initialData, exams, defaultExamId]);
 
   const handleImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

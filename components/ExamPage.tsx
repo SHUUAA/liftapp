@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Exam, AnnotationRowData, AnnotationCellData, ImageSettings, DisplayStatusType, UserExamCompletionRecord } from '../types';
-import { ANNOTATION_TABLE_COLUMNS } from '../constants';
+import { getColumnsForExam } from '../constants';
 import { useExamData } from '../hooks/useExamData';
 import { generateRowId } from '../utils/examUtils';
 import ExamHeader from './exam/ExamHeader';
@@ -28,6 +28,8 @@ interface ExamPageProps {
 }
 
 const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBackToDashboard }) => {
+  const columnsForCurrentExam = useMemo(() => getColumnsForExam(exam.id), [exam.id]);
+  
   const {
     allImageTasks,
     currentImageTaskIndex,
@@ -185,7 +187,7 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
     const currentTask = currentTaskForDisplay;
     const imageRef = currentTask ? (currentTask.original_filename || currentTask.storage_path) : `doc_${exam.id}_default`;
 
-    const newCells: AnnotationCellData = ANNOTATION_TABLE_COLUMNS.reduce((acc, col) => {
+    const newCells: AnnotationCellData = columnsForCurrentExam.reduce((acc, col) => {
         acc[col.id] = col.id === 'image_ref' ? imageRef : '';
         return acc;
     }, {} as AnnotationCellData);
@@ -198,13 +200,13 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
 
     if (focusNewRow) {
       setTimeout(() => {
-        const firstEditableColIndex = ANNOTATION_TABLE_COLUMNS.findIndex(col => col.id !== 'image_ref');
+        const firstEditableColIndex = columnsForCurrentExam.findIndex(col => col.id !== 'image_ref');
         if (inputRefs.current[newRowIndex]?.[firstEditableColIndex >= 0 ? firstEditableColIndex : 0]) {
             inputRefs.current[newRowIndex][firstEditableColIndex >= 0 ? firstEditableColIndex : 0]?.focus();
         }
       }, 0);
     }
-  }, [rows.length, exam.id, currentTaskForDisplay, setRowsFromHook]); 
+  }, [rows.length, exam.id, currentTaskForDisplay, setRowsFromHook, columnsForCurrentExam]); 
   
   const handleDeleteRow = useCallback((rowIndexToDelete: number) => {
     if (rows.length <= 1) { alert("Cannot delete the last remaining row."); return; }
@@ -263,7 +265,7 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
 
 
   const filledCells = useMemo(() => rows.reduce((acc, row) => acc + Object.values(row.cells).filter(cell => (cell?.toString() || '').trim() !== '').length, 0), [rows]);
-  const totalCells = useMemo(() => rows.length * ANNOTATION_TABLE_COLUMNS.length, [rows]);
+  const totalCells = useMemo(() => rows.length * columnsForCurrentExam.length, [rows, columnsForCurrentExam]);
   const emptyCells = totalCells - filledCells;
   const progress = totalCells > 0 ? Math.round((filledCells / totalCells) * 100) : 0;
 
@@ -394,7 +396,7 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
         <AnnotationTable
           examName={exam.name}
           rows={rows}
-          columns={ANNOTATION_TABLE_COLUMNS}
+          columns={columnsForCurrentExam}
           activeRowIndex={activeRowIndex}
           onSetActiveRowIndex={setActiveRowIndex}
           onCellChange={handleCellChange}

@@ -1,6 +1,7 @@
+
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { AnswerKeyEntry, Exam, AdminProfile, AdminTab, FetchedAnswerKeySummary, AnnotatorInfo, AnalyticsData, UserExamScoreMetrics, AdminDashboardPageProps } from '../../types';
-import { EXAMS_DATA, ANNOTATION_TABLE_COLUMNS } from '../../constants';
+import { EXAMS_DATA } from '../../constants';
 import AnswerKeyForm from './AnswerKeyForm';
 import { supabase } from '../../utils/supabase/client';
 
@@ -478,7 +479,6 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
             {showAnswerKeyForm ? (
               <AnswerKeyForm
                 exams={EXAMS_DATA}
-                columns={ANNOTATION_TABLE_COLUMNS}
                 onSave={handleSaveAnswerKey}
                 onCancel={() => { setShowAnswerKeyForm(false); setEditingAnswerKey(null);}}
                 initialData={editingAnswerKey}
