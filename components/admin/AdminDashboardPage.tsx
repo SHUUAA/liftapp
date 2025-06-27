@@ -1,19 +1,22 @@
-
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { AnswerKeyEntry, Exam, AdminProfile, AdminTab, FetchedAnswerKeySummary, AnnotatorInfo, AnalyticsData, UserExamScoreMetrics } from '../../types';
+import { AnswerKeyEntry, Exam, AdminProfile, AdminTab, FetchedAnswerKeySummary, AnnotatorInfo, AnalyticsData, UserExamScoreMetrics, AdminDashboardPageProps } from '../../types';
 import { EXAMS_DATA, ANNOTATION_TABLE_COLUMNS } from '../../constants';
 import AnswerKeyForm from './AnswerKeyForm';
 import { supabase } from '../../utils/supabase/client';
 
 const STORAGE_BUCKET_NAME = 'exam-images';
 
-interface AdminDashboardPageProps {
-  adminId: string;
-  onAdminLogout: () => void;
-}
+const formatDurationForAdmin = (totalSeconds?: number): string => {
+  if (totalSeconds === undefined || totalSeconds === null || totalSeconds < 0) {
+    return 'N/A';
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+};
 
 // Helper function to convert array of objects to CSV string
-const convertToCSV = (data: AnnotatorInfo[], columnsToInclude: {key: keyof AnnotatorInfo | string, header: string, isExamSpecific?: boolean, examCode?: string, metricKey?: keyof UserExamScoreMetrics}[]) => {
+const convertToCSV = (data: AnnotatorInfo[], columnsToInclude: {key: keyof AnnotatorInfo | string, header: string, isExamSpecific?: boolean, examCode?: string, metricKey?: keyof UserExamScoreMetrics | 'duration_seconds'}[]) => {
   if (!data || data.length === 0) {
     return '';
   }
@@ -22,14 +25,26 @@ const convertToCSV = (data: AnnotatorInfo[], columnsToInclude: {key: keyof Annot
     return columnsToInclude.map(col => {
       let value: any;
       if (col.isExamSpecific && col.examCode && col.metricKey) {
-        value = row.per_exam_scores?.[col.examCode]?.[col.metricKey];
+        if (col.metricKey === 'duration_seconds') {
+            value = row.per_exam_scores?.[col.examCode]?.duration_seconds;
+            if (typeof value === 'number') {
+                 // Format as "Xm Ys" for CSV readability, or keep as raw seconds
+                const minutes = Math.floor(value / 60);
+                const seconds = value % 60;
+                value = `${minutes}m ${seconds}s`;
+            } else {
+                value = 'N/A';
+            }
+        } else {
+            value = row.per_exam_scores?.[col.examCode]?.[col.metricKey as keyof UserExamScoreMetrics];
+        }
       } else {
         value = row[col.key as keyof AnnotatorInfo];
       }
       
       if (value === null || value === undefined) {
         value = '';
-      } else if (typeof value === 'number' && (col.key === 'overall_score_percentage' || col.metricKey === 'score_percentage')) {
+      } else if (typeof value === 'number' && (col.key === 'overall_score_percentage' || (col.metricKey === 'score_percentage' && col.isExamSpecific))) {
         value = `${value.toFixed(1)}%`;
       } else {
         value = String(value);
@@ -116,26 +131,40 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
   const fetchAnnotators = useCallback(async () => {
     setIsLoadingAnnotators(true);
     try {
+        // Ensure this RPC is updated to return exam_code_duration_seconds fields
         const { data, error } = await supabase.rpc('get_all_annotators_with_per_exam_scores'); 
+        
+        console.log("DEBUG: Raw data from get_all_annotators_with_per_exam_scores RPC:", data); // Log raw data
+
         if (error) {
             console.error("Error fetching annotators with per-exam scores:", error);
-            alert(`Failed to load annotators: ${error.message}. Ensure RPC 'get_all_annotators_with_per_exam_scores' is created and returns the expected columns.`);
+            alert(`Failed to load annotators: ${error.message}. Ensure RPC 'get_all_annotators_with_per_exam_scores' is created and returns the expected columns, including 'exam_code_duration_seconds'. Check browser console for raw RPC data.`);
             setAllAnnotators([]);
         } else {
             setAllAnnotators((data || []).map((item: any) => {
                 const per_exam_scores: Record<string, UserExamScoreMetrics> = {};
                 EXAMS_DATA.forEach(exam => {
                     const examCode = exam.id;
-                    const key_ks = item[`${examCode}_key_ks`] || 0;
-                    const effective_ks = item[`${examCode}_effective_ks`] || 0;
+                    const total_chars_in_key = item[`${examCode}_key_ks`] || 0;
+                    const matching_chars = item[`${examCode}_effective_ks`] || 0;
+                    // Check if duration_seconds exists and is a number
+                    const duration = typeof item[`${examCode}_duration_seconds`] === 'number' ? item[`${examCode}_duration_seconds`] : undefined;
+                    if(item.liftapp_user_id === 'testuser') { // Example for debugging a specific user
+                        console.log(`DEBUG: Annotator ${item.liftapp_user_id}, Exam ${examCode}, Duration from RPC: ${item[`${examCode}_duration_seconds`]}, Processed as: ${duration}`);
+                    }
+
                     per_exam_scores[examCode] = {
                         images_attempted: item[`${examCode}_images_attempted`] || 0,
                         images_scored: item[`${examCode}_images_scored`] || 0,
-                        effective_ks: effective_ks,
-                        key_ks: key_ks,
-                        score_percentage: key_ks > 0 ? parseFloat(((effective_ks / key_ks) * 100).toFixed(1)) : 0,
+                        matching_chars: matching_chars,
+                        total_chars_in_key: total_chars_in_key,
+                        score_percentage: total_chars_in_key > 0 ? parseFloat(((matching_chars / total_chars_in_key) * 100).toFixed(1)) : 0,
+                        duration_seconds: duration, // Expect this field from RPC
                     };
                 });
+                
+                const sum_total_matching_characters_overall = item.sum_total_effective_user_keystrokes_overall || 0;
+                const sum_total_characters_in_key_overall = item.sum_total_answer_key_keystrokes_overall || 0;
 
                 return {
                     id: item.id,
@@ -143,10 +172,10 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
                     created_at: new Date(item.created_at).toLocaleDateString(),
                     total_images_attempted_overall: item.total_images_attempted_overall || 0,
                     total_images_scored_overall: item.total_images_scored_overall || 0,
-                    sum_total_effective_user_keystrokes_overall: item.sum_total_effective_user_keystrokes_overall || 0,
-                    sum_total_answer_key_keystrokes_overall: item.sum_total_answer_key_keystrokes_overall || 0,
-                    overall_score_percentage: (item.sum_total_answer_key_keystrokes_overall && item.sum_total_answer_key_keystrokes_overall > 0)
-                        ? parseFloat(((item.sum_total_effective_user_keystrokes_overall / item.sum_total_answer_key_keystrokes_overall) * 100).toFixed(1))
+                    sum_total_matching_characters_overall: sum_total_matching_characters_overall,
+                    sum_total_characters_in_key_overall: sum_total_characters_in_key_overall,
+                    overall_score_percentage: (sum_total_characters_in_key_overall > 0)
+                        ? parseFloat(((sum_total_matching_characters_overall / sum_total_characters_in_key_overall) * 100).toFixed(1))
                         : 0,
                     per_exam_scores: per_exam_scores,
                 } as AnnotatorInfo;
@@ -230,7 +259,7 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
         alert(`Error fetching configuration for exam '${examCode}'.`);
         return null;
     }
-    if (data && exam) exam.dbId = data.id;
+    if (data && exam) exam.dbId = data.id; // Cache it on the EXAMS_DATA constant
     return data ? data.id : null;
   };
 
@@ -272,12 +301,12 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
                 uploader_profile_id: currentAdminProfile.id,
             };
 
-            if (imageDbId && keyData.imageFile) {
+            if (imageDbId && keyData.imageFile) { // If existing image is being replaced
                  const { data, error: updateImageError } = await supabase
                     .from('images').update(imageRecord).eq('id', imageDbId).select('id').single();
                 if (updateImageError) throw updateImageError;
                 imageDbId = data?.id;
-            } else if (!imageDbId) {
+            } else if (!imageDbId) { // New image
                 const { data, error: insertImageError } = await supabase
                     .from('images').insert(imageRecord).select('id').single();
                 if (insertImageError) throw insertImageError;
@@ -287,16 +316,18 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
         
         if (!imageDbId) throw new Error("Failed to get or create a database ID for the image.");
 
+        // Delete existing answer rows for this image before inserting new ones (if it's an update)
         const { error: deleteError } = await supabase.from('answer_key_rows').delete().eq('image_id', imageDbId);
         if (deleteError) {
+          // This might not be critical if we are just adding more, but for a clean update, it's good.
           console.warn("Failed to delete old answer rows during update, attempting to insert new ones anyway:", deleteError.message);
         }
         
         const answerRowsToInsert = keyData.answers.map(answerRow => ({
-            image_id: imageDbId,
+            image_id: imageDbId, // Ensured to be non-null by now
             admin_profile_id: currentAdminProfile.id,
             row_data: answerRow.cells,
-            client_row_id: answerRow.id,
+            client_row_id: answerRow.id, // Persist client-generated row ID
         }));
 
         if (answerRowsToInsert.length > 0) {
@@ -307,7 +338,7 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
         alert('Answer key saved successfully!');
         setShowAnswerKeyForm(false);
         setEditingAnswerKey(null);
-        fetchAnswerKeySummaries();
+        fetchAnswerKeySummaries(); // Refresh the list
 
     } catch (error: any) {
       console.error("Failed to save answer key:", error);
@@ -322,19 +353,19 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
     try {
         const {data: answerRowsData, error} = await supabase
             .from('answer_key_rows')
-            .select('row_data, client_row_id')
+            .select('row_data, client_row_id') // Ensure client_row_id is selected
             .eq('image_id', summary.dbImageId);
 
         if (error) throw error;
 
         const answers: AnswerKeyEntry['answers'] = answerRowsData.map((dbRow: any) => ({
-             id: dbRow.client_row_id || `fallback_id_${Math.random().toString(36).substring(2,9)}`,
+             id: dbRow.client_row_id || `fallback_id_${Math.random().toString(36).substring(2,9)}`, // Use client_row_id
              cells: dbRow.row_data
         }));
         
         setEditingAnswerKey({
             examId: summary.examCode,
-            imageId: summary.originalFilename || summary.storagePath,
+            imageId: summary.originalFilename || summary.storagePath, // Used as a reference, actual file might not be re-selected
             imageUrl: summary.imageUrl,
             answers: answers,
             dbImageId: summary.dbImageId,
@@ -355,10 +386,16 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
     }
     setIsLoadingAnswerKeys(true);
     try {
-        const { error } = await supabase.from('answer_key_rows').delete().eq('image_id', dbImageId);
-        if (error) throw error;
-        alert("Answer key deleted successfully.");
-        fetchAnswerKeySummaries(); 
+        // First delete associated answer_key_rows
+        const { error: deleteRowsError } = await supabase.from('answer_key_rows').delete().eq('image_id', dbImageId);
+        if (deleteRowsError) throw deleteRowsError;
+
+        // Optionally, if you want to delete the image record from 'images' table as well (but not from storage)
+        // const { error: deleteImageError } = await supabase.from('images').delete().eq('id', dbImageId);
+        // if (deleteImageError) throw deleteImageError;
+
+        alert("Answer key (rows) deleted successfully.");
+        fetchAnswerKeySummaries(); // Refresh the list
     } catch (e: any) {
         console.error("Error deleting answer key:", e);
         alert(`Failed to delete answer key: ${e.message}`);
@@ -380,23 +417,24 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
   }, [allAnnotators, annotatorSearchTerm]);
 
   const handleExportAnnotatorsToCSV = () => {
-    const columnsToExport: {key: keyof AnnotatorInfo | string, header: string, isExamSpecific?: boolean, examCode?: string, metricKey?: keyof UserExamScoreMetrics}[] = [
+    const columnsToExport: {key: keyof AnnotatorInfo | string, header: string, isExamSpecific?: boolean, examCode?: string, metricKey?: keyof UserExamScoreMetrics | 'duration_seconds'}[] = [
         { key: 'id', header: 'DB ID' },
         { key: 'liftapp_user_id', header: 'LiftApp User ID' },
         { key: 'created_at', header: 'Registered On' },
         { key: 'total_images_attempted_overall', header: 'Overall Img Attempted' },
         { key: 'total_images_scored_overall', header: 'Overall Img Scored' },
-        { key: 'sum_total_effective_user_keystrokes_overall', header: 'Overall Effective KS' },
-        { key: 'sum_total_answer_key_keystrokes_overall', header: 'Overall Total Key KS' },
+        { key: 'sum_total_matching_characters_overall', header: 'Overall Matching Chars' },
+        { key: 'sum_total_characters_in_key_overall', header: 'Overall Total Chars in Key' },
         { key: 'overall_score_percentage', header: 'Overall Score (%)' },
     ];
 
     EXAMS_DATA.forEach(exam => {
         columnsToExport.push({ key: `${exam.id}_images_attempted`, header: `${exam.name} Img Attempted`, isExamSpecific: true, examCode: exam.id, metricKey: 'images_attempted' });
         columnsToExport.push({ key: `${exam.id}_images_scored`, header: `${exam.name} Img Scored`, isExamSpecific: true, examCode: exam.id, metricKey: 'images_scored' });
-        columnsToExport.push({ key: `${exam.id}_effective_ks`, header: `${exam.name} Effective KS`, isExamSpecific: true, examCode: exam.id, metricKey: 'effective_ks' });
-        columnsToExport.push({ key: `${exam.id}_key_ks`, header: `${exam.name} Total Key KS`, isExamSpecific: true, examCode: exam.id, metricKey: 'key_ks' });
+        columnsToExport.push({ key: `${exam.id}_matching_chars`, header: `${exam.name} Matching Chars`, isExamSpecific: true, examCode: exam.id, metricKey: 'matching_chars' });
+        columnsToExport.push({ key: `${exam.id}_total_chars_in_key`, header: `${exam.name} Total Chars in Key`, isExamSpecific: true, examCode: exam.id, metricKey: 'total_chars_in_key' });
         columnsToExport.push({ key: `${exam.id}_score_percentage`, header: `${exam.name} Score (%)`, isExamSpecific: true, examCode: exam.id, metricKey: 'score_percentage' });
+        columnsToExport.push({ key: `${exam.id}_duration_seconds`, header: `${exam.name} Duration`, isExamSpecific: true, examCode: exam.id, metricKey: 'duration_seconds' });
     });
 
     const csvData = convertToCSV(filteredAnnotators, columnsToExport);
@@ -551,15 +589,16 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
                       <th scope="col" className="px-3 py-3">Registered On</th>
                       <th scope="col" className="px-3 py-3 text-center">Overall Img Att.</th>
                       <th scope="col" className="px-3 py-3 text-center">Overall Img Scored</th>
-                      <th scope="col" className="px-3 py-3 text-center">Overall Eff. KS</th>
-                      <th scope="col" className="px-3 py-3 text-center">Overall Key KS</th>
+                      <th scope="col" className="px-3 py-3 text-center" title="Overall Matching Characters">Overall Matching Chars</th>
+                      <th scope="col" className="px-3 py-3 text-center" title="Overall Total Characters">Overall Total Chars</th>
                       <th scope="col" className="px-3 py-3 text-center">Overall Score (%)</th>
                       {EXAMS_DATA.map(exam => (
                         <React.Fragment key={exam.id}>
                           <th scope="col" className="px-3 py-3 text-center border-l border-slate-300">{exam.name} Img Att.</th>
                           <th scope="col" className="px-3 py-3 text-center">{exam.name} Img Scored</th>
-                          <th scope="col" className="px-3 py-3 text-center">{exam.name} Eff. KS</th>
-                          <th scope="col" className="px-3 py-3 text-center">{exam.name} Key KS</th>
+                          <th scope="col" className="px-3 py-3 text-center" title="Matching Characters">{exam.name} Matching Chars</th>
+                          <th scope="col" className="px-3 py-3 text-center" title="Total Characters">{exam.name} Total Chars</th>
+                           <th scope="col" className="px-3 py-3 text-center">{exam.name} Duration</th>
                           <th scope="col" className="px-3 py-3 text-center">{exam.name} Score (%)</th>
                         </React.Fragment>
                       ))}
@@ -572,8 +611,8 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
                         <td className="px-3 py-3">{annotator.created_at}</td>
                         <td className="px-3 py-3 text-center">{annotator.total_images_attempted_overall ?? 'N/A'}</td>
                         <td className="px-3 py-3 text-center">{annotator.total_images_scored_overall ?? 'N/A'}</td>
-                        <td className="px-3 py-3 text-center text-green-600 font-semibold">{annotator.sum_total_effective_user_keystrokes_overall ?? 'N/A'}</td>
-                        <td className="px-3 py-3 text-center">{annotator.sum_total_answer_key_keystrokes_overall ?? 'N/A'}</td>
+                        <td className="px-3 py-3 text-center text-green-600 font-semibold">{annotator.sum_total_matching_characters_overall ?? 'N/A'}</td>
+                        <td className="px-3 py-3 text-center">{annotator.sum_total_characters_in_key_overall ?? 'N/A'}</td>
                         <td className="px-3 py-3 text-center">
                             {annotator.overall_score_percentage !== undefined && annotator.overall_score_percentage !== null ? (
                                 <span className={`font-bold px-2 py-1 rounded-full text-xs ${
@@ -591,10 +630,11 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
                                 <React.Fragment key={exam.id}>
                                     <td className="px-3 py-3 text-center border-l border-slate-300">{examScores?.images_attempted ?? 0}</td>
                                     <td className="px-3 py-3 text-center">{examScores?.images_scored ?? 0}</td>
-                                    <td className="px-3 py-3 text-center text-green-600 font-semibold">{examScores?.effective_ks ?? 0}</td>
-                                    <td className="px-3 py-3 text-center">{examScores?.key_ks ?? 0}</td>
+                                    <td className="px-3 py-3 text-center text-green-600 font-semibold">{examScores?.matching_chars ?? 0}</td>
+                                    <td className="px-3 py-3 text-center">{examScores?.total_chars_in_key ?? 0}</td>
+                                    <td className="px-3 py-3 text-center">{formatDurationForAdmin(examScores?.duration_seconds)}</td>
                                     <td className="px-3 py-3 text-center">
-                                    {examScores?.score_percentage !== undefined && examScores?.score_percentage !== null && examScores.key_ks! > 0 ? (
+                                    {examScores?.score_percentage !== undefined && examScores?.score_percentage !== null && examScores.total_chars_in_key! > 0 ? (
                                         <span className={`font-bold px-2 py-1 rounded-full text-xs ${
                                             examScores.score_percentage >= 75 ? 'bg-green-100 text-green-700' :
                                             examScores.score_percentage >= 50 ? 'bg-yellow-100 text-yellow-700' :

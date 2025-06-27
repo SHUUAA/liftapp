@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Exam, AnnotationRowData, AnnotationCellData, ImageTask, DisplayStatusType } from '../types';
 import { supabase } from '../utils/supabase/client';
@@ -24,7 +25,8 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
   const [isSubmittingToServer, setIsSubmittingToServer] = useState<boolean>(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
 
-  const currentExamDbIdRef = useRef<number | null>(exam.dbId || null);
+  const [currentExamDbId, setCurrentExamDbId] = useState<number | null>(exam.dbId || null);
+
 
   const initializeNewRowsForImage = useCallback((imageTask?: ImageTask): AnnotationRowData[] => {
     const initialCells: AnnotationCellData = {};
@@ -103,10 +105,10 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
       setCurrentImageTaskIndex(-1);
       setRows([]); 
       setDisplayStatus('');
-      currentExamDbIdRef.current = exam.dbId || null;
+      
+      let examDbIdToUse = exam.dbId || null;
 
-
-      if (!currentExamDbIdRef.current) {
+      if (!examDbIdToUse) {
           const { data: examData, error: examError } = await supabase
               .from('exams')
               .select('id')
@@ -120,15 +122,21 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
               onBackToDashboard(); 
               return;
           }
-          currentExamDbIdRef.current = examData.id;
+          examDbIdToUse = examData.id;
       }
+      setCurrentExamDbId(examDbIdToUse); // Set the fetched/validated exam DB ID
       
-      const examDbId = currentExamDbIdRef.current;
+      if (!examDbIdToUse) { // Should not happen if previous block runs correctly
+        setIsLoadingImageTasks(false);
+        alert(`Critical Error: Exam DB ID could not be determined for ${exam.name}.`);
+        onBackToDashboard();
+        return;
+      }
 
       const { data: imageTasksData, error: imageTasksError } = await supabase
         .from('images')
         .select('id, storage_path, original_filename, exam_id')
-        .eq('exam_id', examDbId);
+        .eq('exam_id', examDbIdToUse);
 
       if (imageTasksError) {
         const formattedImageTasksError = formatSupabaseError(imageTasksError);
@@ -192,70 +200,91 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
         await loadAnnotationsForCurrentImage(); 
     };
     
-    if (!isLoadingImageTasks) { 
+    if (!isLoadingImageTasks && currentExamDbId) { // Ensure currentExamDbId is set before loading images/annotations
        loadImageAndAnnotations();
     }
-  }, [currentImageTaskIndex, allImageTasks, isLoadingImageTasks, loadAnnotationsForCurrentImage, initializeNewRowsForImage]);
+  }, [currentImageTaskIndex, allImageTasks, isLoadingImageTasks, loadAnnotationsForCurrentImage, initializeNewRowsForImage, currentExamDbId]);
 
-  const submitCurrentAnnotations = useCallback(async () => {
-    if (!annotatorDbId) {
-      alert("User session error (annotator ID missing). Cannot submit data.");
-      setDisplayStatus('Error submitting');
-      return false;
-    }
-    if (currentImageTaskIndex === -1 || !allImageTasks[currentImageTaskIndex]) {
-      alert("No active image task. Cannot submit data.");
-      setDisplayStatus('Error submitting');
-      return false;
+  const submitAllExamAnnotations = useCallback(async () => {
+    if (!annotatorDbId || !currentExamDbId) {
+        alert("User session error (annotator ID or exam ID missing). Cannot submit data.");
+        setDisplayStatus('Error submitting');
+        return false;
     }
 
     setIsSubmittingToServer(true);
     setDisplayStatus('Submitting...');
-    const currentTask = allImageTasks[currentImageTaskIndex];
 
     try {
-      const rowsToSave = rows.map(clientRow => ({
-        annotator_id: annotatorDbId,
-        image_id: currentTask.dbImageId,
-        row_data: { ...clientRow.cells }, 
-        client_row_id: clientRow.id, 
-        is_submitted: true,
-      }));
+        const allAnnotationsByImageId = new Map<number, AnnotationRowData[]>();
 
-      if (rowsToSave.length > 0) {
-          const { error: saveError } = await supabase.from('annotation_rows').upsert(
-            rowsToSave, 
-            { onConflict: 'annotator_id, image_id, client_row_id' }
-          ); 
-
-          if (saveError) {
-            const formattedError = formatSupabaseError(saveError);
-             let detailedMessage = `Error submitting data: ${formattedError.message}`;
-            if(!formattedError.isNetworkError) {
-                 detailedMessage += `\n\nThis could be an issue with your database setup or Row-Level Security (RLS) policies on the 'annotation_rows' table. Check console for details.`;
+        // Load all drafts from local storage for the entire exam
+        for (const task of allImageTasks) {
+            const draft = loadAnnotationsFromLocalStorage(annotatorDbId, exam.id, task.dbImageId);
+            if (draft) {
+                allAnnotationsByImageId.set(task.dbImageId, draft);
             }
-            console.error('Full submission error details:', saveError); // Log for admin/dev
-            setDisplayStatus('Error submitting');
-            alert(detailedMessage);
-            setIsSubmittingToServer(false);
-            return false;
-          }
-      }
-      
-      const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setDisplayStatus(`Submitted at ${currentTime}`);
-      setHasUnsavedChanges(false);
-      removeAnnotationsFromLocalStorage(annotatorDbId, exam.id, currentTask.dbImageId);
-      setIsSubmittingToServer(false);
-      return true;
+        }
+        
+        // Overwrite with the current on-screen annotations to ensure they are the most recent
+        const currentTask = allImageTasks[currentImageTaskIndex];
+        if (currentTask) {
+             allAnnotationsByImageId.set(currentTask.dbImageId, rows);
+        }
+
+        const allRowsForUpsert = [];
+        for (const [imageId, annotationRows] of allAnnotationsByImageId.entries()) {
+            for (const clientRow of annotationRows) {
+                const hasData = Object.values(clientRow.cells).some(val => val && String(val).trim() !== '');
+                if (hasData) {
+                    allRowsForUpsert.push({
+                        annotator_id: annotatorDbId,
+                        image_id: imageId,
+                        row_data: { ...clientRow.cells },
+                        client_row_id: clientRow.id,
+                        is_submitted: true,
+                    });
+                }
+            }
+        }
+
+        if (allRowsForUpsert.length > 0) {
+            const { error: saveError } = await supabase.from('annotation_rows').upsert(
+                allRowsForUpsert,
+                { onConflict: 'annotator_id, image_id, client_row_id' }
+            );
+
+            if (saveError) {
+              const formattedError = formatSupabaseError(saveError);
+               let detailedMessage = `Error submitting data: ${formattedError.message}`;
+              if(!formattedError.isNetworkError) {
+                   detailedMessage += `\n\nThis could be an issue with your database setup or Row-Level Security (RLS) policies on the 'annotation_rows' table. Check console for details.`;
+              }
+              console.error('Full submission error details:', saveError);
+              alert(detailedMessage);
+              setDisplayStatus('Error submitting');
+              setIsSubmittingToServer(false);
+              return false;
+            }
+        }
+
+        for (const task of allImageTasks) {
+            removeAnnotationsFromLocalStorage(annotatorDbId, exam.id, task.dbImageId);
+        }
+        
+        const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setDisplayStatus(`Submitted at ${currentTime}`);
+        setHasUnsavedChanges(false);
+        setIsSubmittingToServer(false);
+        return true;
     } catch (error: any) {
-      const formattedError = formatSupabaseError(error);
-      alert(`Failed to submit data: ${formattedError.message}`);
-      setDisplayStatus('Error submitting');
-      setIsSubmittingToServer(false);
-      return false;
+        const formattedError = formatSupabaseError(error);
+        alert(`Failed to submit data: ${formattedError.message}`);
+        setDisplayStatus('Error submitting');
+        setIsSubmittingToServer(false);
+        return false;
     }
-  }, [rows, annotatorDbId, currentImageTaskIndex, allImageTasks, exam.id]);
+  }, [rows, annotatorDbId, currentExamDbId, allImageTasks, exam.id, currentImageTaskIndex]);
   
   const persistDraft = useCallback(() => {
     if (hasUnsavedChanges && annotatorDbId && currentImageTaskIndex !== -1 && allImageTasks[currentImageTaskIndex]) {
@@ -286,16 +315,18 @@ export const useExamData = ({ exam, annotatorDbId, onBackToDashboard }: UseExamD
     currentImageUrl,
     imageLoading,
     rows,
-    setRows: updateRowsAndSignalChange, // Use the wrapped setter
+    setRows: updateRowsAndSignalChange,
     displayStatus,
-    setDisplayStatus, // Allow ExamPage to override if needed for specific non-data messages
+    setDisplayStatus, 
     isSubmittingToServer,
-    hasUnsavedChanges, // Expose for beforeUnload logic in ExamPage
-    setHasUnsavedChanges, // Expose for cell change logic
-    submitCurrentAnnotations,
+    setIsSubmittingToServer, // Expose setter
+    hasUnsavedChanges, 
+    setHasUnsavedChanges, 
+    submitAllExamAnnotations,
     navigateImage,
     persistDraft,
     currentTaskForDisplay,
-    initializeNewRowsForImage, // Expose if ExamPage needs to manually init rows outside task changes
+    initializeNewRowsForImage,
+    currentExamDbId, // Expose the current exam's database ID
   };
 };

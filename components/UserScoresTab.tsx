@@ -1,7 +1,8 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../utils/supabase/client';
 import { UserExamScore } from '../types';
+import { EXAMS_DATA } from '../constants'; // Import EXAMS_DATA
+import { checkIfExamCompleted, clearExamCompletedInLocalStorage } from '../utils/localStorageUtils'; // Import completion utilities
 
 interface UserScoresTabProps {
   annotatorDbId: number;
@@ -17,6 +18,15 @@ const formatSupabaseError = (error: any): string => {
   return String(error || 'Unknown error');
 };
 
+const formatDuration = (totalSeconds?: number): string => {
+  if (totalSeconds === undefined || totalSeconds === null || totalSeconds < 0) {
+    return 'N/A';
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
+
 const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
   const [scores, setScores] = useState<UserExamScore[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -26,35 +36,58 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
     setLoading(true);
     setError(null);
     try {
+      // Ensure your RPC 'get_annotator_exam_scores' now returns 'duration_seconds'
       const { data, error: rpcError } = await supabase.rpc('get_annotator_exam_scores', {
         p_annotator_db_id: annotatorDbId 
       });
 
+      console.log("DEBUG: Raw data from get_annotator_exam_scores RPC:", data); // Log raw data
+
       if (rpcError) {
         const formattedError = formatSupabaseError(rpcError);
-        console.error('Error fetching scores (RPC Error):', rpcError); // Log the original object
+        console.error('Error fetching scores (RPC Error):', rpcError);
         throw new Error(formattedError);
       }
       
-      const processedScores = (data || []).map((score: any) => ({
-        exam_code: score.exam_code,
-        exam_name: score.exam_name,
-        total_effective_user_keystrokes: score.total_effective_user_keystrokes,
-        total_answer_key_keystrokes: score.total_answer_key_keystrokes,
-        images_attempted: score.images_attempted,
-        images_scored: score.images_scored,
-        percentage_score: score.total_answer_key_keystrokes > 0 
-          ? parseFloat(((score.total_effective_user_keystrokes / score.total_answer_key_keystrokes) * 100).toFixed(1))
-          : 0,
-      }));
+      const fetchedScoresData = data || [];
+      const processedScores: UserExamScore[] = fetchedScoresData.map((score: any) => {
+        const duration = typeof score.duration_seconds === 'number' ? score.duration_seconds : undefined;
+        const total_matching_characters = score.total_effective_user_keystrokes || 0;
+        const total_characters_in_key = score.total_answer_key_keystrokes || 0;
+        // console.log(`DEBUG: Processing score for ${score.exam_name}, duration_seconds from RPC: ${score.duration_seconds}, processed as: ${duration}`);
+
+        return {
+          exam_code: score.exam_code,
+          exam_name: score.exam_name,
+          total_matching_characters: total_matching_characters,
+          total_characters_in_key: total_characters_in_key,
+          images_attempted: score.images_attempted,
+          images_scored: score.images_scored,
+          percentage_score: total_characters_in_key > 0 
+            ? parseFloat(((total_matching_characters / total_characters_in_key) * 100).toFixed(1))
+            : 0,
+          duration_seconds: duration,
+        };
+      });
       setScores(processedScores);
 
+      // Reconcile local storage completion status
+      if (annotatorDbId) {
+        const examCodesWithBackendScores = new Set(fetchedScoresData.map((s: any) => s.exam_code));
+        EXAMS_DATA.forEach(examConst => {
+          if (checkIfExamCompleted(annotatorDbId, examConst.id)) {
+            if (!examCodesWithBackendScores.has(examConst.id)) {
+              console.log(`Reconciling: Exam ${examConst.id} is marked completed locally but no score found on backend. Clearing local flag.`);
+              clearExamCompletedInLocalStorage(annotatorDbId, examConst.id);
+            }
+          }
+        });
+      }
+
     } catch (e: any) {
-      // If e is an Error object, e.message is already set (e.g. from the throw above)
-      // Otherwise, format it.
       const errorMessage = e instanceof Error ? e.message : formatSupabaseError(e);
-      setError(`Failed to load scores: ${errorMessage}. Please ensure the 'get_annotator_exam_scores' Supabase function is correctly set up and returns data in the expected format (including 'total_effective_user_keystrokes' and 'total_answer_key_keystrokes').`);
-      console.error("Full error object/exception in fetchScores:", e); // Log the original exception
+      setError(`Failed to load scores: ${errorMessage}. Please ensure the 'get_annotator_exam_scores' Supabase function is updated to return 'duration_seconds' and other expected fields. Check browser console for raw RPC data.`);
+      console.error("Full error object/exception in fetchScores:", e);
     } finally {
       setLoading(false);
     }
@@ -106,8 +139,9 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
               <th scope="col" className="px-6 py-4 font-semibold">Exam Name</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">Images Attempted</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">Images Scored</th>
-              <th scope="col" className="px-6 py-4 font-semibold text-center">Effective Keystrokes</th>
-              <th scope="col" className="px-6 py-4 font-semibold text-center">Total Key Keystrokes</th>
+              <th scope="col" className="px-6 py-4 font-semibold text-center">Matching Characters</th>
+              <th scope="col" className="px-6 py-4 font-semibold text-center">Total Characters in Key</th>
+              <th scope="col" className="px-6 py-4 font-semibold text-center">Duration</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">Score (%)</th>
             </tr>
           </thead>
@@ -117,10 +151,11 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
                 <td className="px-6 py-4 whitespace-nowrap font-medium text-slate-900">{score.exam_name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">{score.images_attempted}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">{score.images_scored}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-center text-green-600 font-semibold">{score.total_effective_user_keystrokes}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-center">{score.total_answer_key_keystrokes}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-center text-green-600 font-semibold">{score.total_matching_characters}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-center">{score.total_characters_in_key}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-center">{formatDuration(score.duration_seconds)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">
-                  {score.total_answer_key_keystrokes > 0 ? (
+                  {score.total_characters_in_key > 0 ? (
                     <span className={`font-bold px-2 py-1 rounded-full text-xs ${
                       score.percentage_score! >= 75 ? 'bg-green-100 text-green-700' :
                       score.percentage_score! >= 50 ? 'bg-yellow-100 text-yellow-700' :
@@ -137,9 +172,9 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
           </tbody>
         </table>
       </div>
-       {scores.some(s => s.total_answer_key_keystrokes === 0 && s.images_attempted > 0) && (
+       {scores.some(s => s.total_characters_in_key === 0 && s.images_attempted > 0) && (
         <p className="px-6 py-3 text-xs text-slate-500 bg-slate-50 border-t border-slate-200">
-          * N/A means no answer key was available for the images you attempted in this exam, or the answer key had no scorable keystrokes (e.g., all relevant cells in the key were empty).
+          * N/A means no answer key was available for the images you attempted in this exam, or the answer key had no scorable characters (e.g., all relevant cells in the key were empty).
         </p>
       )}
     </div>

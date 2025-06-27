@@ -1,11 +1,15 @@
+
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Exam, AnnotationRowData, AnnotationCellData, ImageSettings, DisplayStatusType } from '../types';
+import { Exam, AnnotationRowData, AnnotationCellData, ImageSettings, DisplayStatusType, UserExamCompletionRecord } from '../types';
 import { ANNOTATION_TABLE_COLUMNS } from '../constants';
 import { useExamData } from '../hooks/useExamData';
 import { generateRowId } from '../utils/examUtils';
 import ExamHeader from './exam/ExamHeader';
 import ImageViewer from './exam/ImageViewer';
 import AnnotationTable from './exam/AnnotationTable';
+import { markExamAsCompletedInLocalStorage, checkIfExamCompleted } from '../utils/localStorageUtils';
+import { supabase } from '../utils/supabase/client';
+import { formatSupabaseError } from '../utils/errorUtils';
 
 const SPECIAL_CHARS_MAP: Record<string, { lower: string; upper: string }> = {
   a: { lower: 'á', upper: 'Á' }, e: { lower: 'é', upper: 'É' },
@@ -13,6 +17,8 @@ const SPECIAL_CHARS_MAP: Record<string, { lower: string; upper: string }> = {
   u: { lower: 'ú', upper: 'Ú' }, n: { lower: 'ñ', upper: 'Ñ' },
   c: { lower: 'ç', upper: 'Ç' },
 };
+
+const EXAM_DURATION_SECONDS = 20 * 60; // 20 minutes
 
 interface ExamPageProps {
   userId: string;
@@ -33,16 +39,15 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
     displayStatus,
     setDisplayStatus: setDisplayStatusFromHook,
     isSubmittingToServer,
+    setIsSubmittingToServer, 
     hasUnsavedChanges,
-    setHasUnsavedChanges,
-    submitCurrentAnnotations,
+    submitAllExamAnnotations,
     navigateImage,
     persistDraft,
     currentTaskForDisplay,
-    initializeNewRowsForImage,
+    currentExamDbId, 
   } = useExamData({ exam, annotatorDbId, onBackToDashboard });
 
-  // Adjusted initial Y position to -30 to move the image slightly up
   const initialImageSettings: ImageSettings = { zoom: 61, contrast: 100, brightness: 100, position: { x: 0, y: -30 } };
   const [imageSettings, setImageSettings] = useState<ImageSettings>(initialImageSettings);
   
@@ -51,27 +56,126 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
   
   const inputRefs = useRef<(HTMLInputElement | null)[][]>([]);
   const focusedCellRef = useRef<{rowIndex: number, colId: string, inputElement: HTMLInputElement} | null>(null);
+
+  const [timeLeft, setTimeLeft] = useState<number>(EXAM_DURATION_SECONDS);
+  const [isTimerActive, setIsTimerActive] = useState<boolean>(false);
+  const timerIdRef = useRef<number | null>(null);
+  const isExamClosingRef = useRef(false);
+
+  const recordExamCompletionInDb = async (durationSeconds: number, status: 'submitted' | 'timed_out') => {
+    if (!annotatorDbId || !currentExamDbId) {
+      console.error("DEBUG: Cannot record exam completion: annotatorDbId or currentExamDbId is missing.", { annotatorDbId, currentExamDbId });
+      alert("Error: Could not record exam completion details due to missing identifiers. (See console for details)");
+      return;
+    }
+
+    const completionRecord: UserExamCompletionRecord = {
+      annotator_id: annotatorDbId,
+      exam_id: currentExamDbId,
+      duration_seconds: durationSeconds,
+      status: status,
+    };
+    
+    console.log("DEBUG: Attempting to record exam completion with data:", completionRecord);
+
+    try {
+      const { data, error } = await supabase
+        .from('user_exam_completions')
+        .upsert(completionRecord, { onConflict: 'annotator_id, exam_id' }); 
+
+      if (error) {
+        const formattedError = formatSupabaseError(error);
+        console.error("DEBUG: Error saving exam completion to DB:", formattedError.message, error);
+        alert(`Error: Your work was submitted, but there was an issue saving the exam completion details (duration/status) to the database: ${formattedError.message}\n(See console for more details)`);
+      } else {
+        console.log("DEBUG: Exam completion and duration recorded successfully in DB.", data);
+      }
+    } catch (e: any) {
+      const formattedError = formatSupabaseError(e);
+      console.error("DEBUG: Exception saving exam completion to DB:", formattedError.message, e);
+      alert(`Error: Your work was submitted, but there was an issue saving the exam completion details (exception): ${formattedError.message}\n(See console for more details)`);
+    }
+  };
+
+
+  const handleExamClosure = useCallback(async (status: 'submitted' | 'timed_out') => {
+    if (isExamClosingRef.current) return;
+    isExamClosingRef.current = true;
+    setIsTimerActive(false);
+    if (timerIdRef.current) clearInterval(timerIdRef.current);
+
+    const durationTakenSeconds = EXAM_DURATION_SECONDS - timeLeft;
+
+    if (annotatorDbId && currentExamDbId) {
+      // If the exam timed out, we need to perform the final submission now.
+      if (status === 'timed_out') {
+          console.log("DEBUG: Exam timed out, submitting all work.");
+          await submitAllExamAnnotations();
+      }
+      
+      // The `finalize_exam_annotations` RPC has been removed as it's redundant and caused duplication issues.
+      // The new `submitAllExamAnnotations` function now handles submitting all work for the entire exam.
+      
+      await recordExamCompletionInDb(durationTakenSeconds, status);
+      markExamAsCompletedInLocalStorage(annotatorDbId, exam.id);
+    } else {
+      console.warn("DEBUG: annotatorDbId or currentExamDbId is null, cannot finalize or record exam completion or mark in localStorage.");
+    }
+    
+    let message = "";
+    if (status === 'submitted') {
+      message = `All work for the ${exam.name} exam has been submitted and the exam is now closed. Time taken: ${Math.floor(durationTakenSeconds / 60)}m ${durationTakenSeconds % 60}s. Thank you!`;
+    } else { // timed_out
+      message = `Time is up! All your work has been automatically submitted. The exam is now closed. Total time elapsed: ${Math.floor(durationTakenSeconds / 60)}m ${durationTakenSeconds % 60}s.`;
+    }
+    alert(message);
+    onBackToDashboard();
+  }, [annotatorDbId, exam.id, exam.name, onBackToDashboard, persistDraft, timeLeft, recordExamCompletionInDb, currentExamDbId, submitAllExamAnnotations]);
+
+
+  useEffect(() => {
+    if (!isLoadingImageTasks && annotatorDbId) {
+      if (checkIfExamCompleted(annotatorDbId, exam.id)) {
+        alert(`You have already completed the ${exam.name} exam. Returning to dashboard.`);
+        onBackToDashboard();
+        return;
+      }
+      if (allImageTasks.length > 0 && currentImageTaskIndex !== -1 && !isTimerActive && !isExamClosingRef.current) {
+        setIsTimerActive(true);
+      }
+    }
+  }, [isLoadingImageTasks, allImageTasks, currentImageTaskIndex, annotatorDbId, exam.id, exam.name, onBackToDashboard, isTimerActive]);
+
+  useEffect(() => {
+    if (isTimerActive && timeLeft > 0) {
+      timerIdRef.current = window.setInterval(() => {
+        setTimeLeft(prevTime => prevTime - 1);
+      }, 1000);
+    } else if (timeLeft <= 0 && isTimerActive && !isExamClosingRef.current) {
+      handleExamClosure('timed_out');
+    }
+    return () => {
+      if (timerIdRef.current) clearInterval(timerIdRef.current);
+    };
+  }, [isTimerActive, timeLeft, handleExamClosure]);
   
   useEffect(() => {
-    // Reset image position when the image task changes (currentTaskForDisplay is a dependency)
-    // This ensures that when a new image loads, its position is reset.
     setImageSettings(prev => ({...prev, position: { x: 0, y: -30 }}));
-    setActiveRowIndex(0); // Also reset active row for new image
+    setActiveRowIndex(0);
+    isExamClosingRef.current = false; 
   }, [currentTaskForDisplay]);
 
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) {
+      if (hasUnsavedChanges && !isExamClosingRef.current) { 
         persistDraft();
-        // Standard way to prompt user, though modern browsers might override message
-        // event.returnValue = 'You have unsaved changes. Are you sure you want to leave?'; 
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      if (hasUnsavedChanges) { // Persist one last time if component unmounts with changes
+      if (hasUnsavedChanges && !isExamClosingRef.current) {
           persistDraft();
       }
     };
@@ -91,7 +195,6 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
     setRowsFromHook(prevRows => [...prevRows, newRow]);
     const newRowIndex = rows.length; 
     setActiveRowIndex(newRowIndex);
-    // setHasUnsavedChanges(true) and setDisplayStatus handled by setRowsFromHook
 
     if (focusNewRow) {
       setTimeout(() => {
@@ -106,7 +209,6 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
   const handleDeleteRow = useCallback((rowIndexToDelete: number) => {
     if (rows.length <= 1) { alert("Cannot delete the last remaining row."); return; }
     setRowsFromHook(prevRows => prevRows.filter((_, idx) => idx !== rowIndexToDelete));
-    // setHasUnsavedChanges(true) and setDisplayStatus handled by setRowsFromHook
     const newActiveIndex = Math.max(0, rowIndexToDelete - 1);
     if (rows.length - 1 === 0) setActiveRowIndex(null);
     else if (activeRowIndex === rowIndexToDelete) {
@@ -126,7 +228,6 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
       }
     }
     setRowsFromHook(prevRows => prevRows.map((row, idx) => idx === rowIndex ? { ...row, cells: { ...row.cells, [columnId]: processedValue } } : row));
-    // setHasUnsavedChanges(true) and setDisplayStatus handled by setRowsFromHook
   }, [toolSettings.firstCharCaps, rows, setRowsFromHook]);
   
   const handleImageZoomChange = (value: number) => setImageSettings(prev => ({ ...prev, zoom: Math.max(10, Math.min(300, value)) }));
@@ -136,29 +237,28 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
 
   const handleToolSettingChange = (setting: keyof typeof toolSettings) => setToolSettings(prev => ({ ...prev, [setting]: !prev[setting] }));
 
-  const handleSubmit = async () => {
-    if (!annotatorDbId || !currentTaskForDisplay) {
-        alert("User session error or no active image task. Cannot submit."); return;
+  const handleSubmitAndCloseExam = async () => {
+    if (isExamClosingRef.current) return;
+    if (!annotatorDbId) {
+        alert("User session error. Cannot submit."); return;
     }
-    const submissionSuccessful = await submitCurrentAnnotations(); 
+    
+    setIsSubmittingToServer(true); 
+    const submissionSuccessful = await submitAllExamAnnotations(); 
 
     if (submissionSuccessful) {
-        alert(`Data submitted for image: ${currentTaskForDisplay.original_filename || currentTaskForDisplay.storage_path}. Progress: ${progress}%. Thank you!`);
-        
-        if (currentImageTaskIndex < allImageTasks.length - 1) {
-            await navigateImage(1, true); 
-             setImageSettings(prev => ({...prev, position: {x:0, y:-30}})); // Reset position for new image
-        } else {
-            alert("All images for this exam submitted!");
-            onBackToDashboard();
-        }
+        await handleExamClosure('submitted');
+    } else {
+        setIsSubmittingToServer(false);
+        alert(`Submission failed for the exam. The exam remains open. Please try again or contact support.`);
+        if(timeLeft > 0 && !isTimerActive && !isExamClosingRef.current) setIsTimerActive(true); 
     }
   };
   
   const handleNavigateImageWithPersistence = async (direction: 1 | -1) => {
-    // persistDraft is called inside navigateImage if hasUnsavedChanges is true and skipLocalSave is false
-    await navigateImage(direction, false);
-    setImageSettings(prev => ({...prev, position: {x:0, y:-30}})); // Reset position for new image
+    if (isExamClosingRef.current) return;
+    await navigateImage(direction, false); 
+    setImageSettings(prev => ({...prev, position: {x:0, y:-30}}));
   };
 
 
@@ -179,7 +279,7 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
           const { selectionStart, selectionEnd, value } = inputElement;
           if (selectionStart !== null && selectionEnd !== null) {
             const newValue = value.substring(0, selectionStart) + charToInsert + value.substring(selectionEnd);
-            handleCellChange(rowIndex, colId, newValue); // This will use the hook's setRows
+            handleCellChange(rowIndex, colId, newValue);
             setTimeout(() => { inputElement.selectionStart = inputElement.selectionEnd = selectionStart + 1; }, 0);
           }
         }
@@ -187,13 +287,16 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
     };
     document.addEventListener('keydown', handleGlobalKeyDown);
     return () => document.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [toolSettings.specialChars, handleCellChange]); // handleCellChange is from useCallback, depends on setRowsFromHook
+  }, [toolSettings.specialChars, handleCellChange]);
 
   const handleTableKeyDown = useCallback((event: React.KeyboardEvent<HTMLTableSectionElement>) => {
     // This function is for keydown events specifically within the table structure, handled by AnnotationTable.tsx inputs.
   }, []);
 
 
+  if (isLoadingImageTasks && !currentTaskForDisplay && !currentExamDbId) { 
+    return <div className="min-h-screen flex items-center justify-center"><p>Loading exam configuration...</p></div>;
+  }
   if (isLoadingImageTasks && !currentTaskForDisplay) {
     return <div className="min-h-screen flex items-center justify-center"><p>Loading exam tasks...</p></div>;
   }
@@ -218,14 +321,23 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
   }
 
   const handleBackToDashboardClick = () => {
+    if (isExamClosingRef.current) { onBackToDashboard(); return; }
+
     if (hasUnsavedChanges) {
-        const confirmLeave = window.confirm("You have unsaved changes for the current image. These will be saved as a draft locally if you proceed. Do you want to return to the dashboard?");
+        const confirmLeave = window.confirm("You have unsaved changes for the current image. These will be saved as a draft locally if you proceed. Do you want to return to the dashboard? This will not submit the exam.");
         if (confirmLeave) {
             persistDraft();
+            setIsTimerActive(false); 
+            if (timerIdRef.current) clearInterval(timerIdRef.current);
             onBackToDashboard();
         }
     } else {
-        onBackToDashboard();
+        const confirmLeave = window.confirm("Are you sure you want to return to the dashboard? This will not submit the exam and your timer will stop.");
+        if (confirmLeave) {
+            setIsTimerActive(false); 
+            if (timerIdRef.current) clearInterval(timerIdRef.current);
+            onBackToDashboard();
+        }
     }
   };
   
@@ -238,7 +350,8 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
         onToolSettingChange={handleToolSettingChange}
         rowsCount={rows.length}
         progress={progress}
-        onSubmit={handleSubmit}
+        timeLeft={timeLeft}
+        onSubmit={handleSubmitAndCloseExam}
         isSubmittingToServer={isSubmittingToServer}
         currentTaskForDisplay={currentTaskForDisplay}
         displayStatus={displayStatus}

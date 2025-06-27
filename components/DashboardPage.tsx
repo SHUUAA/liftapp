@@ -82,10 +82,15 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, on
 
         {activeTab === 'TASKS' && (
           <div>
-            <h2 className="text-2xl font-semibold text-slate-700 mb-6">Available Annotation Tasks</h2>
+            <h2 className="text-2xl font-semibold text-slate-700 mb-6">Available Annotation Exams</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {EXAMS_DATA.map((exam: Exam) => (
-                <ExamCard key={exam.id} exam={exam} onSelectExam={onSelectExam} />
+                <ExamCard 
+                  key={exam.id} 
+                  exam={exam} 
+                  onSelectExam={onSelectExam} 
+                  annotatorDbId={annotatorDbId} 
+                />
               ))}
             </div>
           </div>

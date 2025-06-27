@@ -37,3 +37,43 @@ export const removeAnnotationsFromLocalStorage = (annotatorDbId: number, examCod
     console.error("Error removing annotations from local storage:", error);
   }
 };
+
+// Functions for exam completion status
+export const getExamCompletedKey = (annotatorDbId: number, examCode: string): string => {
+  return `liftapp_exam_completed_${annotatorDbId}_exam_${examCode}`;
+};
+
+export const markExamAsCompletedInLocalStorage = (annotatorDbId: number, examCode: string): void => {
+  if (!annotatorDbId) return;
+  try {
+    const key = getExamCompletedKey(annotatorDbId, examCode);
+    localStorage.setItem(key, 'true');
+    console.log(`Exam ${examCode} marked as completed for annotator ${annotatorDbId}`);
+  } catch (error) {
+    console.error("Error marking exam as completed in local storage:", error);
+  }
+};
+
+export const checkIfExamCompleted = (annotatorDbId: number, examCode: string): boolean => {
+  if (!annotatorDbId) return false;
+  try {
+    const key = getExamCompletedKey(annotatorDbId, examCode);
+    const result = localStorage.getItem(key) === 'true';
+    // console.log(`Checking completion for exam ${examCode}, annotator ${annotatorDbId}: ${result}`);
+    return result;
+  } catch (error) {
+    console.error("Error checking exam completion status from local storage:", error);
+    return false;
+  }
+};
+
+export const clearExamCompletedInLocalStorage = (annotatorDbId: number, examCode: string): void => {
+  if (!annotatorDbId) return;
+  try {
+    const key = getExamCompletedKey(annotatorDbId, examCode);
+    localStorage.removeItem(key);
+    console.log(`Cleared 'completed' status for exam ${examCode} for annotator ${annotatorDbId} from local storage.`);
+  } catch (error) {
+    console.error("Error clearing exam completion status from local storage:", error);
+  }
+};
