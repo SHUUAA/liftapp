@@ -269,25 +269,42 @@ const ExamPage: React.FC<ExamPageProps> = ({ userId, exam, annotatorDbId, onBack
 
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      // Logic for special character insertion
       if (toolSettings.specialChars && event.ctrlKey && event.altKey && focusedCellRef.current) {
         const charKey = event.key.toLowerCase();
         if (SPECIAL_CHARS_MAP[charKey]) {
           event.preventDefault();
           const { lower, upper } = SPECIAL_CHARS_MAP[charKey];
           const charToInsert = event.shiftKey ? upper : lower;
+          
           const { rowIndex, colId, inputElement } = focusedCellRef.current;
           const { selectionStart, selectionEnd, value } = inputElement;
+
           if (selectionStart !== null && selectionEnd !== null) {
             const newValue = value.substring(0, selectionStart) + charToInsert + value.substring(selectionEnd);
-            handleCellChange(rowIndex, colId, newValue);
-            setTimeout(() => { inputElement.selectionStart = inputElement.selectionEnd = selectionStart + 1; }, 0);
+            
+            // Directly update the state, bypassing handleCellChange to avoid conflicts with other features like CapsLock.
+            setRowsFromHook(prevRows => prevRows.map((row, idx) =>
+              idx === rowIndex ? { ...row, cells: { ...row.cells, [colId]: newValue } } : row
+            ));
+
+            // Set cursor position after update
+            setTimeout(() => {
+              if (inputElement) {
+                inputElement.focus();
+                inputElement.selectionStart = inputElement.selectionEnd = selectionStart + 1;
+              }
+            }, 0);
           }
         }
       }
     };
+
     document.addEventListener('keydown', handleGlobalKeyDown);
-    return () => document.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [toolSettings.specialChars, handleCellChange]);
+    return () => {
+      document.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [toolSettings.specialChars, setRowsFromHook]); // This hook is now self-contained and efficient.
 
   const handleTableKeyDown = useCallback((event: React.KeyboardEvent<HTMLTableSectionElement>) => {
     // This function is for keydown events specifically within the table structure, handled by AnnotationTable.tsx inputs.

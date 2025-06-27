@@ -64,6 +64,7 @@ export const ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
   { id: 'event_y', label: 'Event_Y', type: 'text', width: 'w-24' },
   { id: 'given', label: 'Given', type: 'text', width: 'w-36' },
   { id: 'surname', label: 'Surname', type: 'text', width: 'w-36' },
+  { id: 'age', label: 'Age', type: 'text', width: 'w-20' },
   { id: 'sex', label: 'Sex', type: 'text', width: 'w-16' },
   { id: 'birth_d', label: 'Birth_D', type: 'text', width: 'w-20' },
   { id: 'birth_m', label: 'Birth_M', type: 'text', width: 'w-20' },
