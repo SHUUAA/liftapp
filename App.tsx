@@ -5,141 +5,170 @@ import DashboardPage from './components/DashboardPage';
 import ExamPage from './components/ExamPage';
 import AdminLoginPage from './components/admin/AdminLoginPage';
 import AdminDashboardPage from './components/admin/AdminDashboardPage';
-import { AppScreen, Exam, AdminCredentials, DashboardPageProps } from './types';
+import { AppScreen, Exam, AdminCredentials, ImageTask, ActiveExamSession } from './types';
 import { supabase } from './utils/supabase/client';
 import type { Session, User } from '@supabase/supabase-js';
-import { checkIfExamCompleted } from './utils/localStorageUtils'; // Import completion check
+import { formatSupabaseError } from './utils/errorUtils';
+import { ToastProvider, useToast } from './contexts/ToastContext';
+import ToastContainer from './components/common/ToastContainer';
+import { EXAM_DURATION_SECONDS, EXAMS_DATA } from './constants';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('USER_LOGIN');
-  const [userId, setUserId] = useState<string | null>(null); // This is the liftapp_user_id (string)
-  const [currentAnnotatorDbId, setCurrentAnnotatorDbId] = useState<number | null>(null); // This is the annotators.id (integer PK)
-  const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [currentAnnotatorDbId, setCurrentAnnotatorDbId] = useState<number | null>(null);
+  
+  const [activeExamSession, setActiveExamSession] = useState<ActiveExamSession | null>(null);
   
   const [adminUser, setAdminUser] = useState<User | null>(null);
-  const [loadingAdminSession, setLoadingAdminSession] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
+  const { addToast } = useToast();
 
-  const safePushState = (data: any, title: string, url?: string | URL | null) => {
-    if (window.location.protocol !== 'blob:') {
-      window.history.pushState(data, title, url);
+  const isHistoryManipulationAllowed = window.location.protocol !== 'blob:';
+
+  const safePushState = (data: any, url: string) => {
+    if (isHistoryManipulationAllowed && window.location.pathname !== url) {
+      window.history.pushState(data, '', url);
     }
   };
 
-  const safeReplaceState = (data: any, title: string, url?: string | URL | null) => {
-    if (window.location.protocol !== 'blob:') {
-      window.history.replaceState(data, title, url);
+  const safeReplaceState = (data: any, url: string) => {
+    if (isHistoryManipulationAllowed && window.location.pathname !== url) {
+      window.history.replaceState(data, '', url);
     }
   };
-
+  
+  // Effect to load user and session from sessionStorage on initial mount
   useEffect(() => {
-    const initializeSessionAndPath = async () => {
-      setLoadingAdminSession(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      const newAdminUser = session?.user ?? null;
-      setAdminUser(newAdminUser);
-      
-      const path = window.location.pathname.toLowerCase();
+    try {
+      const savedUserId = sessionStorage.getItem('userId');
+      const savedAnnotatorDbId = sessionStorage.getItem('annotatorDbId');
+      if (savedUserId && savedAnnotatorDbId) {
+        setUserId(savedUserId);
+        setCurrentAnnotatorDbId(parseInt(savedAnnotatorDbId, 10));
+      }
 
-      if (newAdminUser) { // Admin is logged in
-        if (path.startsWith('/admin')) {
-          setCurrentScreen('ADMIN_DASHBOARD');
-          safeReplaceState({}, '', '/admin/dashboard'); // Ensure URL reflects state
-        } else { // Admin is logged in but on a user path
-          // If user session also exists, prioritize user path. Otherwise, could redirect to admin or user login.
-          if (userId && currentAnnotatorDbId) {
-            setCurrentScreen(selectedExam ? 'USER_EXAM' : 'USER_DASHBOARD');
-             // URL is already user path, no change needed unless specific logic applies
-          } else {
-             setCurrentScreen('USER_LOGIN'); // Or redirect to /admin/dashboard
-             safeReplaceState({},'', '/login');
-          }
-        }
-      } else { // Admin is NOT logged in
-        if (path.startsWith('/admin')) {
-          setCurrentScreen('ADMIN_LOGIN');
-          safeReplaceState({}, '', '/admin/login'); // Ensure URL reflects state
-        } else { // Admin not logged in, on a user path
-          if (userId && currentAnnotatorDbId) { // Check if user login process completed
-            if (selectedExam && path.startsWith(`/exam/${selectedExam.id}`)) {
-                setCurrentScreen('USER_EXAM');
-            } else if (path.startsWith('/dashboard')) {
-                setCurrentScreen('USER_DASHBOARD');
-            } else { // User logged in but path is something else (e.g. /login or /)
-                setCurrentScreen('USER_DASHBOARD'); // Default to user dashboard
-                safeReplaceState({}, '', '/dashboard');
-            }
-          } else { // No user session, default to user login
-             setCurrentScreen('USER_LOGIN');
-             if (path !== '/' && path !== '/login' && !path.startsWith('/admin')) {
-                safeReplaceState({}, '', '/login');
-             }
-          }
+      const savedSessionJSON = sessionStorage.getItem('activeExamSession');
+      if (savedSessionJSON) {
+        const session: ActiveExamSession = JSON.parse(savedSessionJSON);
+        if (session.sessionEndTime > Date.now()) {
+          setActiveExamSession(session);
+        } else {
+          // Clean up expired session
+          sessionStorage.removeItem('activeExamSession');
         }
       }
-      setLoadingAdminSession(false);
-    };
+    } catch (e) {
+      console.error("Error loading state from sessionStorage", e);
+      sessionStorage.clear(); // Clear potentially corrupted storage
+    }
+  }, []);
 
-    initializeSessionAndPath();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const newAdminUser = session?.user ?? null;
-        setAdminUser(newAdminUser);
-        
-        // Only adjust screen if it's relevant to admin state
-        if (!newAdminUser && currentScreen === 'ADMIN_DASHBOARD') {
-          setCurrentScreen('ADMIN_LOGIN');
-          safeReplaceState({}, '', '/admin/login');
-        } else if (newAdminUser && currentScreen === 'ADMIN_LOGIN') {
-          setCurrentScreen('ADMIN_DASHBOARD');
-          safeReplaceState({}, '', '/admin/dashboard');
-        }
-      }
-    );
-
-    return () => {
-      authListener?.subscription.unsubscribe();
-    };
-  }, []); // Run once on mount to initialize
-
-
+  // Effect to sync activeExamSession to sessionStorage
   useEffect(() => {
-    const handlePopState = () => {
-      // Re-evaluate screen based on path and current auth states
-      const path = window.location.pathname.toLowerCase();
-      setLoadingAdminSession(true); // Indicate potential re-evaluation
-      if (path.startsWith('/admin')) {
-        setCurrentScreen(adminUser ? 'ADMIN_DASHBOARD' : 'ADMIN_LOGIN');
+    try {
+      if (activeExamSession) {
+        sessionStorage.setItem('activeExamSession', JSON.stringify(activeExamSession));
       } else {
-        if (!userId || !currentAnnotatorDbId) {
-          setCurrentScreen('USER_LOGIN');
-          setSelectedExam(null); // Clear selected exam if user logs out or session lost
-        } else if (path.startsWith('/exam/')) {
-            const examIdFromPath = path.split('/exam/')[1];
-            if (selectedExam && selectedExam.id === examIdFromPath) {
-                 setCurrentScreen('USER_EXAM');
-            } else {
-                // If selectedExam is stale or doesn't match, go to dashboard
-                setSelectedExam(null);
+        sessionStorage.removeItem('activeExamSession');
+      }
+    } catch (e) {
+      console.error("Error saving session to sessionStorage", e);
+    }
+  }, [activeExamSession]);
+
+
+  // Unified routing logic
+  const handleRouteChange = useCallback(async () => {
+    setLoading(true);
+    const path = window.location.pathname.toLowerCase();
+    
+    // Ensure exams have their DB IDs for routing
+    if (EXAMS_DATA.some(e => !e.dbId)) {
+        const { data: examsFromDb, error } = await supabase.from('exams').select('id, exam_code');
+        if (error) {
+            addToast({ type: 'error', message: 'Could not load initial exam configuration.' });
+        } else {
+            examsFromDb.forEach(dbExam => {
+                const exam = EXAMS_DATA.find(e => e.id === dbExam.exam_code);
+                if (exam) exam.dbId = dbExam.id;
+            });
+        }
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const currentAdminUser = session?.user ?? null;
+      setAdminUser(currentAdminUser);
+
+      const isLoggedInUser = userId && currentAnnotatorDbId;
+
+      if (path.startsWith('/admin')) {
+        setCurrentScreen(currentAdminUser ? 'ADMIN_DASHBOARD' : 'ADMIN_LOGIN');
+      } else if (isLoggedInUser) {
+        const examCodeFromUrl = path.startsWith('/exam/') ? path.split('/')[2] : null;
+        if (examCodeFromUrl && activeExamSession && activeExamSession.exam.id === examCodeFromUrl) {
+           setCurrentScreen('USER_EXAM');
+        } else if (examCodeFromUrl && !activeExamSession) {
+           // Handle refresh on an exam page
+           const examToResume = EXAMS_DATA.find(e => e.id === examCodeFromUrl);
+           if (examToResume && examToResume.dbId) {
+                // Silently re-select the exam to re-fetch the task, but don't push state
+                handleSelectExam(examToResume, false);
+           } else {
                 setCurrentScreen('USER_DASHBOARD');
-                safeReplaceState({}, '', '/dashboard');
-            }
-        } else if (path.startsWith('/dashboard')) {
-           setCurrentScreen('USER_DASHBOARD');
-           setSelectedExam(null); // Clear exam when navigating to dashboard
-        } else { // Default to user login if path is unrecognized for logged-in user
-           setCurrentScreen('USER_LOGIN');
-           setUserId(null);
-           setCurrentAnnotatorDbId(null);
-           setSelectedExam(null);
+                safeReplaceState({}, '/dashboard');
+           }
+        } else {
+          setCurrentScreen('USER_DASHBOARD');
+          if (!path.startsWith('/dashboard')) {
+            safeReplaceState({}, '/dashboard');
+          }
+        }
+      } else {
+        setCurrentScreen('USER_LOGIN');
+        if (path !== '/login' && path !== '/') {
+            safeReplaceState({}, '/login');
         }
       }
-      setLoadingAdminSession(false);
-    };
+      setLoading(false);
+    });
+  }, [userId, currentAnnotatorDbId, activeExamSession]);
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [adminUser, userId, selectedExam, currentAnnotatorDbId]); // Dependencies for popstate logic
+
+  // Separating the popstate listener setup from the initial routing call to prevent bugs.
+  // This effect sets up the listener for the browser's back and forward buttons.
+  useEffect(() => {
+    // The listener is updated whenever handleRouteChange changes, ensuring it never has a stale closure.
+    window.addEventListener('popstate', handleRouteChange);
+    return () => {
+      window.removeEventListener('popstate', handleRouteChange);
+    };
+  }, [handleRouteChange]);
+
+  // This effect handles the initial routing when the application first loads.
+  useEffect(() => {
+    handleRouteChange();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
+  
+  // Listen to Supabase auth changes for admin
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+        const newAdminUser = session?.user ?? null;
+        const oldAdminUser = adminUser;
+        setAdminUser(newAdminUser);
+
+        if (newAdminUser && !oldAdminUser) { // Admin logs in
+          setCurrentScreen('ADMIN_DASHBOARD');
+          safePushState({}, '/admin/dashboard');
+        } else if (!newAdminUser && oldAdminUser) { // Admin logs out
+          setCurrentScreen('ADMIN_LOGIN');
+          safeReplaceState({}, '/admin/login');
+        }
+    });
+
+    return () => authListener.subscription.unsubscribe();
+  }, [adminUser]);
 
   const getOrCreateAnnotatorInDb = async (liftappUserId: string): Promise<number | null> => {
     try {
@@ -149,10 +178,7 @@ const App: React.FC = () => {
         .eq('liftapp_user_id', liftappUserId)
         .single();
 
-      if (selectError && selectError.code !== 'PGRST116') {
-        console.error('Error fetching annotator:', selectError);
-        throw selectError;
-      }
+      if (selectError && selectError.code !== 'PGRST116') throw selectError;
 
       if (existingAnnotator) {
         return existingAnnotator.id;
@@ -162,32 +188,15 @@ const App: React.FC = () => {
           .insert({ liftapp_user_id: liftappUserId })
           .select('id')
           .single();
-
-        if (insertError) {
-          console.error('Error creating annotator (raw Supabase error):', insertError);
-          throw insertError;
-        }
+        if (insertError) throw insertError;
         return newAnnotator ? newAnnotator.id : null;
       }
     } catch (caughtError: any) {
-      console.error("Full error object in getOrCreateAnnotatorInDb:", caughtError);
-      let displayMessage = "An unexpected error occurred during annotator initialization.";
-      
-      if (typeof caughtError === 'object' && caughtError !== null && caughtError.message) {
-        displayMessage = caughtError.message;
-        if (caughtError.details) displayMessage += ` Details: ${caughtError.details}`;
-        if (caughtError.hint) displayMessage += ` Hint: ${caughtError.hint}`;
-      } else if (typeof caughtError === 'string') {
-        displayMessage = caughtError;
-      } else if (caughtError instanceof Error) {
-        displayMessage = caughtError.message;
-      }
-      
-      alert(`Failed to initialize annotator: ${displayMessage}\n\nHint: Check RLS policies on 'annotators' table. 'anon' role needs SELECT and INSERT permissions.`);
+      const formattedError = formatSupabaseError(caughtError);
+      addToast({ type: 'error', message: `Failed to initialize annotator: ${formattedError.message}`, duration: 8000 });
       return null;
     }
   };
-
 
   const handleLogin = useCallback(async (id: string) => {
     if (id.trim() !== '') {
@@ -195,109 +204,161 @@ const App: React.FC = () => {
       if (dbId) {
         setUserId(id.trim());
         setCurrentAnnotatorDbId(dbId);
+        sessionStorage.setItem('userId', id.trim());
+        sessionStorage.setItem('annotatorDbId', dbId.toString());
         setCurrentScreen('USER_DASHBOARD');
-        safePushState({}, '', '/dashboard');
-      } else {
-        console.error("Could not obtain database ID for annotator. User was alerted.");
+        safePushState({}, '/dashboard');
       }
     }
-  }, []);
+  }, [getOrCreateAnnotatorInDb, isHistoryManipulationAllowed]);
 
   const handleLogout = useCallback(() => {
     setUserId(null);
     setCurrentAnnotatorDbId(null);
-    setSelectedExam(null);
+    setActiveExamSession(null);
+    sessionStorage.clear();
     setCurrentScreen('USER_LOGIN');
-    safePushState({}, '', '/login');
-  }, []);
-
-  const handleSelectExam = useCallback((exam: Exam) => {
-    if (currentAnnotatorDbId && checkIfExamCompleted(currentAnnotatorDbId, exam.id)) {
-      alert(`You have already completed and submitted the ${exam.name} exam. You cannot re-access it.`);
-      return;
-    }
-    setSelectedExam(exam);
-    setCurrentScreen('USER_EXAM');
-    safePushState({}, '', `/exam/${exam.id}`);
-  }, [currentAnnotatorDbId]); // Added currentAnnotatorDbId as dependency
-
-  const handleBackToDashboard = useCallback(() => {
-    setSelectedExam(null);
-    setCurrentScreen('USER_DASHBOARD');
-    safePushState({}, '', '/dashboard');
-  }, []);
+    safeReplaceState({}, '/login');
+  }, [isHistoryManipulationAllowed]);
 
   const handleAdminLogin = useCallback(async ({ email, password }: AdminCredentials) => {
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        throw error;
-      }
-      // onAuthStateChange will handle setting currentScreen to ADMIN_DASHBOARD & URL
-    } catch (error: any) {
-      alert(`Admin Login Failed: ${error.message || 'Unknown error'}`);
-      console.error("Admin login error:", error);
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+        const formattedError = formatSupabaseError(error);
+        addToast({ type: 'error', message: `Admin login failed: ${formattedError.message}` });
     }
-  }, []);
+    // Auth state change listener will handle the screen update
+    setLoading(false);
+  }, [addToast]);
 
   const handleAdminLogout = useCallback(async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        throw error;
-      }
-      // onAuthStateChange will handle setting currentScreen to ADMIN_LOGIN & URL
-      // safePushState({}, '', '/admin/login'); // Let onAuthStateChange handle URL for consistency
-    } catch (error: any) {
-        alert(`Admin Logout Failed: ${error.message || 'Unknown error'}`);
-        console.error("Admin logout error:", error);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+        const formattedError = formatSupabaseError(error);
+        addToast({ type: 'error', message: `Admin logout failed: ${formattedError.message}` });
     }
-  }, []);
-
-
-  if (loadingAdminSession) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100">
-        <p className="text-xl text-slate-700">Loading Application...</p>
-      </div>
-    );
-  }
-
-  // Admin Routes
-  if (currentScreen === 'ADMIN_LOGIN') {
-    return <AdminLoginPage onAdminLogin={handleAdminLogin} isLoading={false} />;
-  }
-  if (currentScreen === 'ADMIN_DASHBOARD') {
-    if (adminUser) { // Guard: only render if adminUser is confirmed
-      return <AdminDashboardPage adminId={adminUser.email || adminUser.id} onAdminLogout={handleAdminLogout} />;
-    } else {
-      // If adminUser is null, onAuthStateChange should have changed screen.
-      // Fallback to AdminLogin if somehow this state is reached.
-      return <AdminLoginPage onAdminLogin={handleAdminLogin} isLoading={false} />;
-    }
-  }
-
-  // User Routes
-  if (!userId || !currentAnnotatorDbId) { // If user session info is missing, force login
-    if (currentScreen !== 'USER_LOGIN') setCurrentScreen('USER_LOGIN'); // Correct state if needed
-    return <LoginPage onLogin={handleLogin} />;
-  }
-  if (currentScreen === 'USER_DASHBOARD') {
-    // Ensure currentAnnotatorDbId is passed. userId is already passed.
-    const dashboardProps: DashboardPageProps = {
-        userId,
-        annotatorDbId: currentAnnotatorDbId,
-        onLogout: handleLogout,
-        onSelectExam: handleSelectExam,
-    };
-    return <DashboardPage {...dashboardProps} />;
-  }
-  if (currentScreen === 'USER_EXAM' && selectedExam && currentAnnotatorDbId) {
-    return <ExamPage userId={userId} exam={selectedExam} annotatorDbId={currentAnnotatorDbId} onBackToDashboard={handleBackToDashboard} />;
-  }
+     // Auth state change listener will handle the screen update
+  }, [addToast]);
   
-  // Default fallback if no other screen matches
-  return <LoginPage onLogin={handleLogin} />; 
+  const handleSelectExam = useCallback(async (exam: Exam, shouldPushState = true) => {
+    if (!currentAnnotatorDbId || !userId) {
+        addToast({ type: 'error', message: "User session is invalid. Cannot start exam." });
+        return;
+    }
+    if (!exam.dbId) {
+        addToast({ type: 'error', message: `Exam configuration for '${exam.name}' is missing.` });
+        return;
+    }
+
+    try {
+        const { data, error } = await supabase.rpc('start_exam_and_assign_image', {
+            p_annotator_id: currentAnnotatorDbId,
+            p_exam_id: exam.dbId,
+        });
+
+        if (error) throw error;
+        if (!data || data.length === 0) throw new Error("Could not retrieve an assigned image from the server.");
+
+        const assignedTask: ImageTask = {
+            dbImageId: data[0].db_image_id,
+            storage_path: data[0].storage_path,
+            original_filename: data[0].original_filename,
+            exam_id: data[0].exam_id,
+        };
+        
+        const session: ActiveExamSession = {
+            exam,
+            assignedTask,
+            sessionEndTime: Date.now() + EXAM_DURATION_SECONDS * 1000,
+            annotatorDbId: currentAnnotatorDbId,
+            userId: userId,
+        };
+
+        setActiveExamSession(session);
+        setCurrentScreen('USER_EXAM');
+        if (shouldPushState) {
+            safePushState({ examId: exam.id }, `/exam/${exam.id}`);
+        }
+
+    } catch (e: any) {
+        const formattedError = formatSupabaseError(e);
+        addToast({ type: 'error', message: `Error starting exam session: ${formattedError.message}` });
+    }
+  }, [currentAnnotatorDbId, userId, addToast, isHistoryManipulationAllowed]);
+  
+  const handleResumeExam = useCallback(() => {
+    if (activeExamSession) {
+      setCurrentScreen('USER_EXAM');
+      safePushState({ examId: activeExamSession.exam.id }, `/exam/${activeExamSession.exam.id}`);
+    }
+  }, [activeExamSession, isHistoryManipulationAllowed]);
+
+  const handleExamFinish = useCallback(() => {
+    setActiveExamSession(null);
+    setCurrentScreen('USER_DASHBOARD');
+    safeReplaceState({}, '/dashboard');
+  }, [isHistoryManipulationAllowed]);
+
+  const handleBackToDashboard = useCallback(() => {
+    setCurrentScreen('USER_DASHBOARD');
+    safePushState({}, '/dashboard');
+  }, [isHistoryManipulationAllowed]);
+
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-800">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white"></div>
+        </div>
+      );
+    }
+
+    switch (currentScreen) {
+      case 'USER_LOGIN':
+        return <LoginPage onLogin={handleLogin} />;
+      case 'USER_DASHBOARD':
+        return userId && currentAnnotatorDbId ? (
+          <DashboardPage
+            userId={userId}
+            annotatorDbId={currentAnnotatorDbId}
+            onLogout={handleLogout}
+            onSelectExam={handleSelectExam}
+            activeSession={activeExamSession}
+            onResumeExam={handleResumeExam}
+          />
+        ) : null;
+      case 'USER_EXAM':
+        return activeExamSession ? (
+          <ExamPage 
+            activeSession={activeExamSession}
+            onBackToDashboard={handleBackToDashboard}
+            onExamFinish={handleExamFinish}
+          />
+        ) : null;
+      case 'ADMIN_LOGIN':
+        return <AdminLoginPage onAdminLogin={handleAdminLogin} isLoading={loading} />;
+      case 'ADMIN_DASHBOARD':
+        return adminUser ? (
+          <AdminDashboardPage adminId={adminUser.id} onAdminLogout={handleAdminLogout} />
+        ) : null;
+      default:
+        return <LoginPage onLogin={handleLogin} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen">
+      {renderContent()}
+      <ToastContainer />
+    </div>
+  );
 };
+
+const App: React.FC = () => (
+  <ToastProvider>
+    <AppContent />
+  </ToastProvider>
+);
 
 export default App;

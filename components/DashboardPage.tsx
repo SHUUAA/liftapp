@@ -1,14 +1,109 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { EXAMS_DATA } from '../constants';
 import ExamCard from './ExamCard';
 import UserScoresTab from './UserScoresTab'; // New import
-import { Exam, DashboardPageProps } from '../types';
+import { Exam, DashboardPageProps, ActiveExamSession } from '../types';
+import { supabase } from '../utils/supabase/client';
 
 type DashboardTab = 'TASKS' | 'SCORES';
 
-const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, onLogout, onSelectExam }) => {
+const formatTime = (seconds: number): string => {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+};
+
+const ActiveExamBanner: React.FC<{ session: ActiveExamSession, onResume: () => void }> = ({ session, onResume }) => {
+  const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.floor((session.sessionEndTime - Date.now()) / 1000)));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft(prevTime => {
+        if (prevTime <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [session.sessionEndTime]);
+
+  return (
+    <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-md shadow-lg mb-8 flex items-center justify-between">
+      <div>
+        <h3 className="font-bold">Ongoing Exam: {session.exam.name}</h3>
+        <p className="text-sm">
+          You have an exam in progress. Resume to continue or wait for the timer to end.
+        </p>
+      </div>
+      <div className="flex items-center space-x-4">
+        <div className="text-center">
+            <div className="font-mono text-xl font-semibold">{formatTime(timeLeft)}</div>
+            <div className="text-xs text-yellow-700">Time Remaining</div>
+        </div>
+        <button
+          onClick={onResume}
+          className="px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-yellow-100 transition-colors"
+        >
+          Resume Exam
+        </button>
+      </div>
+    </div>
+  );
+};
+
+
+const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, onLogout, onSelectExam, activeSession, onResumeExam }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('TASKS');
+  const [completionStatus, setCompletionStatus] = useState<Map<string, boolean>>(new Map());
+  const [isLoadingStatus, setIsLoadingStatus] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (!annotatorDbId) {
+      setIsLoadingStatus(false);
+      return;
+    }
+
+    const fetchCompletionStatus = async () => {
+      setIsLoadingStatus(true);
+      try {
+        const { data: completions, error } = await supabase
+          .from('user_exam_completions')
+          .select('status, exams(exam_code)')
+          .eq('annotator_id', annotatorDbId)
+          .in('status', ['submitted', 'timed_out']);
+
+        if (error) {
+          console.error("Error fetching completion status:", error);
+          return;
+        }
+        
+        const completedExamCodes = new Set(
+          (completions || []).map(c => {
+            if (Array.isArray(c.exams)) return c.exams[0]?.exam_code;
+            return (c.exams as { exam_code: string } | null)?.exam_code;
+          }).filter(Boolean) as string[]
+        );
+        
+        const newStatus = new Map<string, boolean>();
+        EXAMS_DATA.forEach(exam => {
+          newStatus.set(exam.id, completedExamCodes.has(exam.id));
+        });
+        
+        setCompletionStatus(newStatus);
+      } catch (e) {
+        console.error("Exception while fetching completion status:", e);
+      } finally {
+        setIsLoadingStatus(false);
+      }
+    };
+
+    fetchCompletionStatus();
+  }, [annotatorDbId]);
+
 
   const TasksIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-2">
@@ -57,6 +152,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, on
             </span>
         </div>
 
+        {activeTab === 'TASKS' && activeSession && (
+            <ActiveExamBanner session={activeSession} onResume={onResumeExam} />
+        )}
+
         <div className="mb-8 border-b border-slate-300">
           <nav className="flex space-x-1 sm:space-x-2" aria-label="Tabs">
             <button
@@ -83,16 +182,25 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, on
         {activeTab === 'TASKS' && (
           <div>
             <h2 className="text-2xl font-semibold text-slate-700 mb-6">Available Annotation Exams</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {EXAMS_DATA.map((exam: Exam) => (
-                <ExamCard 
-                  key={exam.id} 
-                  exam={exam} 
-                  onSelectExam={onSelectExam} 
-                  annotatorDbId={annotatorDbId} 
-                />
-              ))}
-            </div>
+            {isLoadingStatus ? (
+              <div className="flex justify-center items-center py-10">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                <p className="ml-4 text-slate-600">Loading exam statuses...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {EXAMS_DATA.map((exam: Exam) => (
+                  <ExamCard 
+                    key={exam.id} 
+                    exam={exam} 
+                    onSelectExam={onSelectExam} 
+                    isCompleted={completionStatus.get(exam.id) || false}
+                    activeSession={activeSession}
+                    onResumeExam={onResumeExam}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 

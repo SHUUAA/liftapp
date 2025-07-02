@@ -1,3 +1,5 @@
+
+
 import React from 'react';
 
 export type AppScreen =
@@ -15,6 +17,23 @@ export interface Exam {
   description: string;
   icon: React.ReactNode; // Icon for the dashboard card
   dbId?: number; // Database primary key for the exam
+}
+
+// Represents a single image task within an exam session
+export interface ImageTask {
+  dbImageId: number; // Primary key from public.images table
+  storage_path: string;
+  original_filename: string | null;
+  exam_id: number; // Foreign key to public.exams table
+}
+
+// Represents an active, timed exam session for a user
+export interface ActiveExamSession {
+  exam: Exam;
+  assignedTask: ImageTask;
+  sessionEndTime: number; // UTC timestamp (e.g., from Date.now()) when the session expires
+  annotatorDbId: number;
+  userId: string;
 }
 
 export interface AnnotationColumn {
@@ -68,9 +87,8 @@ export interface FetchedAnswerKeySummary {
 
 export interface UserExamScoreMetrics {
   images_attempted?: number;
-  images_scored?: number;
-  matching_chars?: number;
-  total_chars_in_key?: number;
+  total_effective_user_keystrokes?: number;
+  total_answer_key_keystrokes?: number;
   score_percentage?: number; // Calculated client-side
   duration_seconds?: number; // Duration of the exam attempt in seconds
 }
@@ -82,9 +100,8 @@ export interface AnnotatorInfo {
   
   // Overall scores
   total_images_attempted_overall?: number;
-  total_images_scored_overall?: number;
-  sum_total_matching_characters_overall?: number;
-  sum_total_characters_in_key_overall?: number;
+  total_effective_user_keystrokes_overall?: number;
+  total_answer_key_keystrokes_overall?: number;
   overall_score_percentage?: number; // Calculated client-side
 
   // Per-exam scores: A dictionary where key is exam_code (e.g., 'baptism')
@@ -113,24 +130,17 @@ export interface AdminProfile {
     email?: string;
 }
 
-// For ExamPage image tasks
-export interface ImageTask {
-  dbImageId: number; // Primary key from public.images table
-  storage_path: string;
-  original_filename: string | null;
-  exam_id: number; // Foreign key to public.exams table
-}
-
 // For User Dashboard: Scores Tab
 export interface UserExamScore {
+  completion_id: number; // Unique ID for the exam attempt
   exam_code: string; // e.g., 'baptism'
   exam_name: string; // Display name, e.g., "Baptism Records"
-  total_matching_characters: number; // User's matching characters
-  total_characters_in_key: number;    // Total possible characters in answer key
+  total_effective_user_keystrokes: number;
+  total_answer_key_keystrokes: number;
   images_attempted: number;
-  images_scored: number; // Number of attempted images that had an answer key
-  percentage_score?: number; // Calculated on client: (total_matching_characters / total_characters_in_key) * 100
+  percentage_score?: number; // Calculated on client: (total_effective_user_keystrokes / total_answer_key_keystrokes) * 100
   duration_seconds?: number; // Duration of the exam attempt in seconds
+  completed_at?: string; // The date and time the exam was completed
 }
 
 // Props for DashboardPage
@@ -139,6 +149,8 @@ export interface DashboardPageProps {
   annotatorDbId: number; // This is the annotators.id (integer PK)
   onLogout: () => void;
   onSelectExam: (exam: Exam) => void;
+  activeSession: ActiveExamSession | null;
+  onResumeExam: () => void;
 }
 
 // Props for AdminDashboardPage
@@ -151,7 +163,16 @@ export interface AdminDashboardPageProps {
 export interface ExamCardProps {
   exam: Exam;
   onSelectExam: (exam: Exam) => void;
-  annotatorDbId: number; // Added to check completion status
+  isCompleted: boolean;
+  activeSession: ActiveExamSession | null;
+  onResumeExam: () => void;
+}
+
+// Props for ExamPage
+export interface ExamPageProps {
+  activeSession: ActiveExamSession;
+  onBackToDashboard: () => void;
+  onExamFinish: () => void;
 }
 
 
@@ -159,6 +180,7 @@ export interface ExamCardProps {
 export interface ExamHeaderProps {
   userId: string;
   onBackToDashboardClick: () => void;
+  onHelpClick: () => void; // Added for help modal
   toolSettings: { guideLine: boolean; firstCharCaps: boolean; specialChars: boolean };
   onToolSettingChange: (setting: keyof ExamHeaderProps['toolSettings']) => void;
   rowsCount: number;
@@ -179,13 +201,13 @@ export interface ImageViewerProps {
   onResetImageSettings: () => void;
   currentImageUrl: string | null;
   currentTaskForDisplay: ImageTask | undefined;
-  allImageTasks: ImageTask[];
-  currentImageTaskIndex: number;
-  onNavigateImage: (direction: 1 | -1, skipLocalSave?: boolean) => Promise<void>;
   imageLoading: boolean;
   toolSettings: { guideLine: boolean };
   examName: string;
-  isLoadingImageTasks: boolean;
+  // Optional props for potential multi-image scenarios in the future
+  allImageTasks?: ImageTask[];
+  currentImageTaskIndex?: number;
+  onNavigateImage?: (direction: 1 | -1) => Promise<void>;
 }
 
 // Props for AnnotationTable
@@ -224,6 +246,17 @@ export type DisplayStatusType =
 export interface UserExamCompletionRecord {
   annotator_id: number;
   exam_id: number;
+  assigned_image_id: number; // The image assigned for this exam session
   duration_seconds: number;
-  status: 'submitted' | 'timed_out';
+  status: 'started' | 'submitted' | 'timed_out';
+}
+
+// For Toast notifications
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
+
+export interface ToastMessage {
+  id: string;
+  type: ToastType;
+  message: string;
+  duration?: number;
 }

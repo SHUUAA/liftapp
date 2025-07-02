@@ -10,6 +10,7 @@ const ClockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" view
 const ExamHeader: React.FC<ExamHeaderProps> = ({
   userId,
   onBackToDashboardClick,
+  onHelpClick,
   toolSettings,
   onToolSettingChange,
   rowsCount,
@@ -20,9 +21,6 @@ const ExamHeader: React.FC<ExamHeaderProps> = ({
   currentTaskForDisplay,
   displayStatus
 }) => {
-  const handleHelpClick = () => {
-    alert("Help Documentation:\n\n- Image Controls: Use zoom, contrast, brightness sliders. Click and drag image to move. Reset button restores default view.\n- Data Entry: Click a cell to edit. Use Tab to navigate. Last cell + Tab adds a new row.\n- Special Characters: Enable 'Special Characters' and use Ctrl+Alt+[key] (e.g., Ctrl+Alt+a for 'á'). Add Shift for uppercase (Ctrl+Alt+Shift+a for 'Á').\n- First Char Capslock: Automatically capitalizes the first letter of a new word in a cell.\n- Guide Line: Shows a horizontal line on the image viewer.\n- Submit: Saves your current work to the server, marks the exam as complete, and closes the exam.\n- Timer: You have 20 minutes to complete the exam. If the timer runs out, your current work is saved as a draft, the exam is marked complete and closed.\n- Drafts: Unsaved changes are automatically saved as a local draft if you navigate away or close the page.\n\nRefer to the full user manual for more details.");
-  };
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -74,7 +72,7 @@ const ExamHeader: React.FC<ExamHeaderProps> = ({
           {isSubmittingToServer ? 'Submitting...' : 'Submit & Close Exam'}
         </button>
         <button 
-          onClick={handleHelpClick} 
+          onClick={onHelpClick} 
           className="p-2 text-slate-600 hover:text-blue-600 rounded-full hover:bg-slate-200 transition-colors" 
           aria-label="Help"
         >

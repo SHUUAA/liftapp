@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Exam, AnnotationColumn, AnnotationRowData, AnswerKeyEntry } from '../../types';
 import { generateRowId } from '../../utils/examUtils'; // Using the centralized helper
 import { getColumnsForExam } from '../../constants';
+import { useToast } from '../../contexts/ToastContext';
 
 interface AnswerKeyFormProps {
   exams: Exam[];
@@ -13,6 +14,7 @@ interface AnswerKeyFormProps {
 }
 
 const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, onSave, onCancel, initialData, defaultExamId }) => {
+  const { addToast } = useToast();
   const [selectedExamId, setSelectedExamId] = useState<string>(() => {
     if (initialData?.examId) return initialData.examId;
     if (defaultExamId) return defaultExamId;
@@ -52,6 +54,21 @@ const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, onSave, onCancel, 
     }
   }, [initialData, exams, defaultExamId]);
 
+  // This effect synchronizes the `image_ref` in all answer rows when the main `imageId` changes.
+  useEffect(() => {
+    setAnswerRows(prevRows => {
+      const needsUpdate = prevRows.some(row => row.cells['image_ref'] !== imageId);
+      // Only update if needed to prevent re-renders
+      if (!needsUpdate && prevRows.length > 0) {
+        return prevRows;
+      }
+      return prevRows.map(row => ({
+        ...row,
+        cells: { ...row.cells, image_ref: imageId }
+      }));
+    });
+  }, [imageId]);
+
   const handleImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -72,9 +89,11 @@ const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, onSave, onCancel, 
     setAnswerRows(prevRows => {
       const newCells: { [key: string]: string } = {};
       columns.forEach(col => newCells[col.id] = '');
+      // Auto-populate the image_ref for the new row from the main form state
+      newCells['image_ref'] = imageId;
       return [...prevRows, { id: generateRowId(), cells: newCells }];
     });
-  }, [columns]);
+  }, [columns, imageId]);
 
   const handleCellChange = useCallback((rowIndex: number, columnId: string, value: string) => {
     setAnswerRows(prevRows =>
@@ -94,17 +113,15 @@ const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, onSave, onCancel, 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedExamId || !imageId.trim()) {
-      alert('Please select an exam and provide an Image Identifier or upload an image.');
+      addToast({ type: 'error', message: 'Please select an exam and provide an Image Identifier or upload an image.' });
       return;
     }
     if (!initialData && !imageFile) { 
-        alert('Please upload an image for the new answer key.');
+        addToast({ type: 'error', message: 'Please upload an image for the new answer key.' });
         return;
     }
     if (answerRows.some(row => Object.values(row.cells).every(cellVal => (cellVal === '' || cellVal === undefined)))) {
       // Removed alert for empty rows to allow flexibility, can be re-added if strict validation is needed.
-      // alert('Please ensure at least one answer cell is filled for each answer row.');
-      // return; 
     }
 
     onSave({
@@ -198,7 +215,7 @@ const AnswerKeyForm: React.FC<AnswerKeyFormProps> = ({ exams, onSave, onCancel, 
                     value={row.cells[col.id] || ''}
                     onChange={e => handleCellChange(rowIndex, col.id, e.target.value)}
                     className="w-full p-1.5 border border-slate-300 rounded-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-xs"
-                    disabled={col.id === 'image_ref' && !!initialData?.imageUrl} // Disable image_ref if editing existing key
+                    disabled={col.id === 'image_ref'}
                   />
                 </div>
               ))}

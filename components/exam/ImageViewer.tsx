@@ -16,13 +16,13 @@ interface ImageViewerProps {
   onResetImageSettings: () => void;
   currentImageUrl: string | null;
   currentTaskForDisplay: ImageTask | undefined;
-  allImageTasks: ImageTask[];
-  currentImageTaskIndex: number;
-  onNavigateImage: (direction: 1 | -1, skipLocalSave?: boolean) => Promise<void>;
   imageLoading: boolean;
   toolSettings: { guideLine: boolean };
   examName: string;
-  isLoadingImageTasks: boolean;
+  // Below props are optional for the new single-image flow but kept for potential future use
+  allImageTasks?: ImageTask[];
+  currentImageTaskIndex?: number;
+  onNavigateImage?: (direction: 1 | -1) => Promise<void>;
 }
 
 const ImageViewer: React.FC<ImageViewerProps> = ({
@@ -33,13 +33,12 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
   onResetImageSettings,
   currentImageUrl,
   currentTaskForDisplay,
-  allImageTasks,
-  currentImageTaskIndex,
-  onNavigateImage,
   imageLoading,
   toolSettings,
   examName,
-  isLoadingImageTasks
+  allImageTasks = [],
+  currentImageTaskIndex = 0,
+  onNavigateImage,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -47,10 +46,8 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!currentImageUrl || !imageContainerRef.current) return;
-    // Prevent dragging if the target is an input or button within the image controls area
     if ((e.target as HTMLElement).closest('button, input[type="range"]')) return;
-    
-    e.preventDefault(); // Important to prevent text selection or other default behaviors
+    e.preventDefault();
     setIsDragging(true);
     setDragStart({
       x: e.clientX - imageSettings.position.x,
@@ -73,7 +70,6 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
     }
   };
   
-  // Effect to add global mouse move and up listeners when dragging starts
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
@@ -81,18 +77,11 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
       const newY = e.clientY - dragStart.y;
       onImagePositionChange({ x: newX, y: newY });
     };
-
-    const handleGlobalMouseUp = () => {
-      if (isDragging) {
-        setIsDragging(false);
-      }
-    };
-
+    const handleGlobalMouseUp = () => { if (isDragging) setIsDragging(false); };
     if (isDragging) {
       document.addEventListener('mousemove', handleGlobalMouseMove);
       document.addEventListener('mouseup', handleGlobalMouseUp);
     }
-
     return () => {
       document.removeEventListener('mousemove', handleGlobalMouseMove);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
@@ -119,21 +108,23 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
           <input type="range" min="0" max="200" value={imageSettings.brightness} onChange={e => onImageSettingChange('brightness', parseInt(e.target.value))} className="w-20 h-1 accent-blue-600" aria-label="Adjust brightness"/>
            <span className="w-8 text-center">{imageSettings.brightness}%</span>
         </div>
-        <div className="flex items-center space-x-2">
-          <button onClick={() => onNavigateImage(-1)} disabled={currentImageTaskIndex <= 0 || allImageTasks.length === 0 || imageLoading} className="p-1.5 rounded hover:bg-slate-200 disabled:opacity-50 transition-colors"><ChevronLeftIcon /></button>
-          <span className="text-xs text-slate-500">
-            Image {allImageTasks.length > 0 ? currentImageTaskIndex + 1 : 0} of {allImageTasks.length}
-          </span>
-          <button onClick={() => onNavigateImage(1)} disabled={currentImageTaskIndex >= allImageTasks.length - 1 || allImageTasks.length === 0 || imageLoading} className="p-1.5 rounded hover:bg-slate-200 disabled:opacity-50 transition-colors"><ChevronRightIcon /></button>
-        </div>
+        {allImageTasks.length > 1 && onNavigateImage && (
+          <div className="flex items-center space-x-2">
+            <button onClick={() => onNavigateImage(-1)} disabled={currentImageTaskIndex <= 0 || imageLoading} className="p-1.5 rounded hover:bg-slate-200 disabled:opacity-50 transition-colors"><ChevronLeftIcon /></button>
+            <span className="text-xs text-slate-500">
+              Image {currentImageTaskIndex + 1} of {allImageTasks.length}
+            </span>
+            <button onClick={() => onNavigateImage(1)} disabled={currentImageTaskIndex >= allImageTasks.length - 1 || imageLoading} className="p-1.5 rounded hover:bg-slate-200 disabled:opacity-50 transition-colors"><ChevronRightIcon /></button>
+          </div>
+        )}
       </div>
       <div 
         ref={imageContainerRef}
         className="flex-grow bg-slate-200 rounded flex items-center justify-center overflow-hidden relative"
         onMouseDown={handleMouseDown}
-        onMouseMove={isDragging ? handleMouseMove : undefined} // Only attach if dragging to avoid perf issues
+        onMouseMove={isDragging ? handleMouseMove : undefined}
         onMouseUp={handleMouseUpOrLeave}
-        onMouseLeave={handleMouseUpOrLeave} // End drag if mouse leaves container
+        onMouseLeave={handleMouseUpOrLeave}
         style={{ cursor: isDragging ? 'grabbing' : (currentImageUrl ? 'grab' : 'default') }}
       >
         {imageLoading && <p className="text-slate-500">Loading image...</p>}
@@ -141,11 +132,11 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
           <img 
             src={currentImageUrl} 
             alt={`Document: ${currentTaskForDisplay.original_filename || currentTaskForDisplay.storage_path}`} 
-            className="max-w-none max-h-none object-contain transition-transform duration-0 ease-linear" // No transition during drag
+            className="max-w-none max-h-none object-contain transition-transform duration-0 ease-linear"
             style={{ 
               transform: `translate(${imageSettings.position.x}px, ${imageSettings.position.y}px) scale(${imageSettings.zoom / 100})`, 
               filter: `contrast(${imageSettings.contrast}%) brightness(${imageSettings.brightness}%)`,
-              pointerEvents: 'none' // Important to allow parent div to capture mouse events
+              pointerEvents: 'none'
             }}
             draggable="false" 
           />
@@ -156,16 +147,16 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
                 <p className="text-sm">Could not load image: {currentTaskForDisplay.original_filename || currentTaskForDisplay.storage_path}</p>
             </div>
         )}
-        {!imageLoading && !currentTaskForDisplay && allImageTasks.length === 0 && !isLoadingImageTasks && (
+         {!imageLoading && !currentTaskForDisplay && (
             <div className="text-center text-slate-500 p-4">
-                <p className="font-semibold">No Images Available</p>
-                <p className="text-sm">There are no images assigned to this exam: {examName}.</p>
+                <p className="font-semibold">No Image Available</p>
+                <p className="text-sm">There is no image assigned to this exam: {examName}.</p>
             </div>
         )}
         {toolSettings.guideLine && (<div className="absolute top-1/2 left-0 w-full h-0.5 bg-green-500 opacity-70 transform -translate-y-1/2 pointer-events-none"></div>)}
       </div>
       <div className="text-right text-xs text-slate-500 pt-1 flex-shrink-0">
-        {currentTaskForDisplay ? (currentTaskForDisplay.original_filename || currentTaskForDisplay.storage_path) : (allImageTasks.length > 0 && !isLoadingImageTasks ? "Loading image info..." : (isLoadingImageTasks ? "Loading..." :`No image loaded for ${examName}`))}
+        {currentTaskForDisplay ? (currentTaskForDisplay.original_filename || currentTaskForDisplay.storage_path) : `No image loaded for ${examName}`}
       </div>
     </section>
   );
