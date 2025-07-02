@@ -87,6 +87,37 @@ export const DEFAULT_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
   { id: 'sp_mo_surname', label: 'Sp_Mo_Surname', type: 'text', width: 'w-36' },
 ];
 
+const BAPTISM_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
+  { id: 'image_ref', label: 'Image', type: 'text', width: 'w-40' },
+  { id: 'language', label: 'Language', type: 'text', width: 'w-24' },
+  { id: 'event_d', label: 'Event_D', type: 'text', width: 'w-20' },
+  { id: 'event_m', label: 'Event_M', type: 'text', width: 'w-20' },
+  { id: 'event_y', label: 'Event_Y', type: 'text', width: 'w-24' },
+  { id: 'given', label: 'Given', type: 'text', width: 'w-36' },
+  { id: 'surname', label: 'Surname', type: 'text', width: 'w-36' },
+  { id: 'birth_d', label: 'Birth_D', type: 'text', width: 'w-20' },
+  { id: 'birth_m', label: 'Birth_M', type: 'text', width: 'w-20' },
+  { id: 'birth_y', label: 'Birth_Y', type: 'text', width: 'w-24' },
+  { id: 'fa_given', label: 'Fa_Given', type: 'text', width: 'w-36' },
+  { id: 'fa_surname', label: 'Fa_Surname', type: 'text', width: 'w-36' },
+  { id: 'mo_given', label: 'Mo_Given', type: 'text', width: 'w-36' },
+  { id: 'mo_surname', label: 'Mo_Surname', type: 'text', width: 'w-36' },
+];
+
+const CONFIRMATION_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
+  { id: 'image_ref', label: 'Image', type: 'text', width: 'w-40' },
+  { id: 'language', label: 'Language', type: 'text', width: 'w-24' },
+  { id: 'event_d', label: 'Event_D', type: 'text', width: 'w-20' },
+  { id: 'event_m', label: 'Event_M', type: 'text', width: 'w-20' },
+  { id: 'event_y', label: 'Event_Y', type: 'text', width: 'w-24' },
+  { id: 'given', label: 'Given', type: 'text', width: 'w-36' },
+  { id: 'surname', label: 'Surname', type: 'text', width: 'w-36' },
+  { id: 'fa_given', label: 'Fa_Given', type: 'text', width: 'w-36' },
+  { id: 'fa_surname', label: 'Fa_Surname', type: 'text', width: 'w-36' },
+  { id: 'mo_given', label: 'Mo_Given', type: 'text', width: 'w-36' },
+  { id: 'mo_surname', label: 'Mo_Surname', type: 'text', width: 'w-36' },
+];
+
 const BURIAL_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
   { id: 'image_ref', label: 'Image', type: 'text', width: 'w-40' },
   { id: 'language', label: 'Language', type: 'text', width: 'w-24' },
@@ -109,10 +140,16 @@ const BURIAL_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
 ];
 
 export const getColumnsForExam = (examCode: string): AnnotationColumn[] => {
-  if (examCode === 'burial') {
-    return BURIAL_ANNOTATION_TABLE_COLUMNS;
+  switch (examCode) {
+    case 'baptism':
+      return BAPTISM_ANNOTATION_TABLE_COLUMNS;
+    case 'confirmation':
+      return CONFIRMATION_ANNOTATION_TABLE_COLUMNS;
+    case 'burial':
+      return BURIAL_ANNOTATION_TABLE_COLUMNS;
+    default: // This will cover 'marriage' and any other exams not explicitly listed.
+      return DEFAULT_ANNOTATION_TABLE_COLUMNS;
   }
-  return DEFAULT_ANNOTATION_TABLE_COLUMNS;
 };
 
 

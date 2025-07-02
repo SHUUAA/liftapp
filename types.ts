@@ -168,11 +168,19 @@ export interface ExamCardProps {
   onResumeExam: () => void;
 }
 
+export interface ExamResult {
+  score: number;
+  passed: boolean;
+  userKeystrokes: number;
+  totalKeystrokes: number;
+}
+
 // Props for ExamPage
 export interface ExamPageProps {
   activeSession: ActiveExamSession;
   onBackToDashboard: () => void;
   onExamFinish: () => void;
+  onRetake: (exam: Exam, excludedImageIds: number[]) => Promise<void>;
 }
 
 
@@ -240,7 +248,8 @@ export type DisplayStatusType =
   | 'Previously submitted data loaded' 
   | 'Submitting...' 
   | `Submitted at ${string}` 
-  | 'Error submitting';
+  | 'Error submitting'
+  | 'Calculating score...';
 
 // For recording exam completion in the database
 export interface UserExamCompletionRecord {

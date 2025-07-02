@@ -63,8 +63,28 @@ const convertToCSV = (data: AnnotatorInfo[], columnsToInclude: {key: keyof Annot
   return `${headers}\n${rows.join('\n')}`;
 };
 
+// Standalone TabButton component to prevent re-creation on every render
+interface TabButtonProps {
+  label: string;
+  tabName: AdminTab;
+  activeTab: AdminTab;
+  onClick: (tabName: AdminTab) => void;
+}
 
-const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdminLogout }) => {
+const TabButton: React.FC<TabButtonProps> = ({ label, tabName, activeTab, onClick }) => (
+  <button
+    onClick={() => onClick(tabName)}
+    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-slate-800
+        ${activeTab === tabName 
+            ? 'bg-red-500 text-white shadow' 
+            : 'bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}`}
+  >
+    {label}
+  </button>
+);
+
+
+export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdminLogout }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('ANSWER_KEYS'); 
   const { addToast } = useToast();
   
@@ -675,18 +695,6 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
     </div>
   );
 
-  const TabButton: React.FC<{label: string, tabName: AdminTab}> = ({label, tabName}) => (
-    <button
-        onClick={() => setActiveTab(tabName)}
-        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-slate-800
-            ${activeTab === tabName 
-                ? 'bg-red-500 text-white shadow' 
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}`}
-    >
-        {label}
-    </button>
-  );
-
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
       <header className="bg-slate-800 text-white shadow-md sticky top-0 z-50">
@@ -712,9 +720,9 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
             </div>
           </div>
           <nav className="flex space-x-2 pb-2 px-1">
-            <TabButton label="Answer Keys" tabName="ANSWER_KEYS" />
-            <TabButton label="Annotators" tabName="ANNOTATORS" />
-            <TabButton label="Analytics" tabName="ANALYTICS" />
+            <TabButton label="Answer Keys" tabName="ANSWER_KEYS" activeTab={activeTab} onClick={setActiveTab} />
+            <TabButton label="Annotators" tabName="ANNOTATORS" activeTab={activeTab} onClick={setActiveTab} />
+            <TabButton label="Analytics" tabName="ANALYTICS" activeTab={activeTab} onClick={setActiveTab} />
           </nav>
         </div>
       </header>
@@ -738,5 +746,3 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId, onAdmi
     </div>
   );
 };
-
-export default AdminDashboardPage;

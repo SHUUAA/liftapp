@@ -1,10 +1,11 @@
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import LoginPage from './components/LoginPage';
 import DashboardPage from './components/DashboardPage';
 import ExamPage from './components/ExamPage';
 import AdminLoginPage from './components/admin/AdminLoginPage';
-import AdminDashboardPage from './components/admin/AdminDashboardPage';
+import { AdminDashboardPage } from './components/admin/AdminDashboardPage';
 import { AppScreen, Exam, AdminCredentials, ImageTask, ActiveExamSession } from './types';
 import { supabase } from './utils/supabase/client';
 import type { Session, User } from '@supabase/supabase-js';
@@ -210,7 +211,7 @@ const AppContent: React.FC = () => {
         safePushState({}, '/dashboard');
       }
     }
-  }, [getOrCreateAnnotatorInDb, isHistoryManipulationAllowed]);
+  }, [addToast, isHistoryManipulationAllowed]);
 
   const handleLogout = useCallback(() => {
     setUserId(null);
@@ -286,6 +287,46 @@ const AppContent: React.FC = () => {
         addToast({ type: 'error', message: `Error starting exam session: ${formattedError.message}` });
     }
   }, [currentAnnotatorDbId, userId, addToast, isHistoryManipulationAllowed]);
+
+  const handleExamRetake = useCallback(async (exam: Exam, excludedImageIds: number[]) => {
+    if (!exam.dbId) {
+      addToast({ type: 'error', message: "Exam configuration is missing, cannot fetch new image." });
+      return;
+    }
+  
+    try {
+      const { data: availableImages, error } = await supabase
+        .from('images')
+        .select('id, storage_path, original_filename, exam_id')
+        .eq('exam_id', exam.dbId)
+        .not('id', 'in', `(${excludedImageIds.join(',')})`);
+  
+      if (error) throw error;
+  
+      if (!availableImages || availableImages.length === 0) {
+        addToast({ type: 'warning', message: 'No more images are available for this exam. Please submit your current score.', duration: 8000 });
+        return;
+      }
+  
+      const newImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+      
+      const newImageTask: ImageTask = {
+        dbImageId: newImage.id,
+        storage_path: newImage.storage_path,
+        original_filename: newImage.original_filename,
+        exam_id: newImage.exam_id,
+      };
+  
+      setActiveExamSession(prev => {
+        if (!prev) return null; // Should not happen
+        return { ...prev, assignedTask: newImageTask };
+      });
+  
+    } catch (e: any) {
+      const formattedError = formatSupabaseError(e);
+      addToast({ type: 'error', message: `Could not get a new image to retake: ${formattedError.message}` });
+    }
+  }, [addToast]);
   
   const handleResumeExam = useCallback(() => {
     if (activeExamSession) {
@@ -334,6 +375,7 @@ const AppContent: React.FC = () => {
             activeSession={activeExamSession}
             onBackToDashboard={handleBackToDashboard}
             onExamFinish={handleExamFinish}
+            onRetake={handleExamRetake}
           />
         ) : null;
       case 'ADMIN_LOGIN':
