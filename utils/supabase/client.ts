@@ -1,8 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-// These environment variables are expected to be available in the execution context.
-// For a production build, these would typically be injected by a build tool.
-// In this SPA setup, they are injected into window.process.env via index.html.
+// Use Vite's import.meta.env for environment variables
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 

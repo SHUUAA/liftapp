@@ -95,6 +95,7 @@ const BAPTISM_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
   { id: 'event_y', label: 'Event_Y', type: 'text', width: 'w-24' },
   { id: 'given', label: 'Given', type: 'text', width: 'w-36' },
   { id: 'surname', label: 'Surname', type: 'text', width: 'w-36' },
+  { id: 'sex', label: 'Sex', type: 'text', width: 'w-16' },
   { id: 'birth_d', label: 'Birth_D', type: 'text', width: 'w-20' },
   { id: 'birth_m', label: 'Birth_M', type: 'text', width: 'w-20' },
   { id: 'birth_y', label: 'Birth_Y', type: 'text', width: 'w-24' },
@@ -102,6 +103,30 @@ const BAPTISM_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
   { id: 'fa_surname', label: 'Fa_Surname', type: 'text', width: 'w-36' },
   { id: 'mo_given', label: 'Mo_Given', type: 'text', width: 'w-36' },
   { id: 'mo_surname', label: 'Mo_Surname', type: 'text', width: 'w-36' },
+];
+
+const MARRIAGE_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
+  { id: 'image_ref', label: 'Image', type: 'text', width: 'w-40' },
+  { id: 'language', label: 'Language', type: 'text', width: 'w-24' },
+  { id: 'event_d', label: 'Event_D', type: 'text', width: 'w-20' },
+  { id: 'event_m', label: 'Event_M', type: 'text', width: 'w-20' },
+  { id: 'event_y', label: 'Event_Y', type: 'text', width: 'w-24' },
+  { id: 'given', label: 'Given', type: 'text', width: 'w-36' },
+  { id: 'surname', label: 'Surname', type: 'text', width: 'w-36' },
+  { id: 'age', label: 'Age', type: 'text', width: 'w-20' },
+  { id: 'birth_y', label: 'Birth_Y', type: 'text', width: 'w-24' },
+  { id: 'fa_given', label: 'Fa_Given', type: 'text', width: 'w-36' },
+  { id: 'fa_surname', label: 'Fa_Surname', type: 'text', width: 'w-36' },
+  { id: 'mo_given', label: 'Mo_Given', type: 'text', width: 'w-36' },
+  { id: 'mo_surname', label: 'Mo_Surname', type: 'text', width: 'w-36' },
+  { id: 'sp_given', label: 'Sp_Given', type: 'text', width: 'w-36' },
+  { id: 'sp_surname', label: 'Sp_Surname', type: 'text', width: 'w-36' },
+  { id: 'sp_age', label: 'Sp_Age', type: 'text', width: 'w-20' },
+  { id: 'sp_birth_y', label: 'Sp_Birth_Y', type: 'text', width: 'w-24' },
+  { id: 'sp_fa_given', label: 'Sp_Fa_Given', type: 'text', width: 'w-36' },
+  { id: 'sp_fa_surname', label: 'Sp_Fa_Surname', type: 'text', width: 'w-36' },
+  { id: 'sp_mo_given', label: 'Sp_Mo_Given', type: 'text', width: 'w-36' },
+  { id: 'sp_mo_surname', label: 'Sp_Mo_Surname', type: 'text', width: 'w-36' },
 ];
 
 const CONFIRMATION_ANNOTATION_TABLE_COLUMNS: AnnotationColumn[] = [
@@ -143,11 +168,13 @@ export const getColumnsForExam = (examCode: string): AnnotationColumn[] => {
   switch (examCode) {
     case 'baptism':
       return BAPTISM_ANNOTATION_TABLE_COLUMNS;
+    case 'marriage':
+      return MARRIAGE_ANNOTATION_TABLE_COLUMNS;
     case 'confirmation':
       return CONFIRMATION_ANNOTATION_TABLE_COLUMNS;
     case 'burial':
       return BURIAL_ANNOTATION_TABLE_COLUMNS;
-    default: // This will cover 'marriage' and any other exams not explicitly listed.
+    default: 
       return DEFAULT_ANNOTATION_TABLE_COLUMNS;
   }
 };
