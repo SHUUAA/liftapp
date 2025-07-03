@@ -31,27 +31,22 @@ const ExamHeader: React.FC<ExamHeaderProps> = ({
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  const handleExitClick = () => {
-    if (isRetakeSession) {
-        onCancelRetakeClick();
-    } else {
-        onBackToDashboardClick();
-    }
-  };
-
-  const exitButtonText = isRetakeSession ? 'Cancel Retake' : 'Back to Dashboard';
-  const exitButtonIcon = isRetakeSession ? <CancelIcon /> : <ArrowLeftIcon />;
-  const exitButtonClassName = isRetakeSession
-    ? "flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
-    : "flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm";
-
-
   return (
     <header className="bg-slate-50 border-b border-slate-300 px-4 py-2 flex items-center justify-between shadow-sm flex-shrink-0">
       <div className="flex items-center space-x-3">
-        <button onClick={handleExitClick} className={exitButtonClassName} aria-label={exitButtonText}>
-            {exitButtonIcon}
-            <span>{exitButtonText}</span>
+        {/* UNIFIED BUTTON: This single button handles both exiting and cancelling a retake. */}
+        <button 
+          onClick={isRetakeSession ? onCancelRetakeClick : onBackToDashboardClick}
+          className={`flex items-center space-x-2 px-3 py-2 rounded-md transition-colors text-sm text-white
+            ${isRetakeSession 
+              ? 'bg-red-600 hover:bg-red-700' 
+              : 'bg-blue-600 hover:bg-blue-700'
+            }`
+          }
+          aria-label={isRetakeSession ? "Cancel Retake" : "Back to Dashboard"}
+        >
+          {isRetakeSession ? <CancelIcon /> : <ArrowLeftIcon />}
+          <span>{isRetakeSession ? "Cancel Retake" : "Back to Dashboard"}</span>
         </button>
         <span className="text-sm text-slate-600">User: <span className="font-medium text-slate-800">{userId}</span></span>
       </div>

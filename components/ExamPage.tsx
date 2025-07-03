@@ -44,6 +44,75 @@ const commonPrefixLength = (s1: string = '', s2: string = ''): number => {
 };
 
 
+/**
+ * Calculates score based on the database's `ROW_NUMBER()` logic.
+ * It compares rows by their index, not their client-side ID.
+ * @param userRows The user's annotation rows.
+ * @param answerKeyRows The correct answer key rows, pre-sorted by creation date.
+ * @returns An ExamResult object with score and other metrics.
+ */
+const calculateScore = (userRows: AnnotationRowData[], answerKeyRows: AnnotationRowData[]): ExamResult => {
+    let totalAnswerKeyChars = 0;
+    let totalMatchingChars = 0;
+
+    // 1. Calculate total scorable characters from the answer key, mimicking `total_chars_in_row`.
+    for (const answerRow of answerKeyRows) {
+        for (const key in answerRow.cells) {
+            if (key === 'image_ref') continue;
+            const value = answerRow.cells[key]?.toString() || '';
+            if (value) {
+                totalAnswerKeyChars += value.length;
+            }
+        }
+    }
+
+    // 2. Compare rows based on their index, which mimics the DB's ROW_NUMBER() logic.
+    // This assumes userRows are in creation order and answerKeyRows are fetched with an order clause.
+    for (let i = 0; i < answerKeyRows.length; i++) {
+        const answerRowData = answerKeyRows[i].cells;
+        const userRowData = userRows[i]?.cells; // Use optional chaining in case user has fewer rows
+
+        if (!userRowData) {
+            // User submitted fewer rows than the key. No more rows to compare.
+            break;
+        }
+
+        // Iterate through the keys of the answer key row, as per the SQL function.
+        for (const key in answerRowData) {
+            if (key === 'image_ref') continue;
+            
+            const answerValue = answerRowData[key]?.toString() || '';
+            if (answerValue) { // Only score non-empty fields in the key.
+                const userValue = userRowData[key]?.toString() || '';
+                totalMatchingChars += commonPrefixLength(userValue, answerValue);
+            }
+        }
+    }
+
+    if (answerKeyRows.length === 0 || totalAnswerKeyChars === 0) {
+        // Handle case where answer key is empty or not found.
+        let totalUserChars = 0;
+        userRows.forEach(row => {
+            for(const key in row.cells) {
+                if (key !== 'image_ref') {
+                    totalUserChars += (row.cells[key]?.toString() || '').length;
+                }
+            }
+        });
+        return { score: 0, passed: false, userKeystrokes: totalUserChars, totalKeystrokes: 0 };
+    }
+
+    const score = (totalMatchingChars / totalAnswerKeyChars) * 100;
+
+    return {
+        score,
+        passed: score >= 90,
+        userKeystrokes: totalMatchingChars,
+        totalKeystrokes: totalAnswerKeyChars,
+    };
+};
+
+
 const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, onExamFinish, onRetake, onCancelRetake }) => {
   const { userId, exam, annotatorDbId, assignedTask, sessionEndTime, completionToOverride } = activeSession;
   
@@ -101,7 +170,8 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
         const { data: answerRowsData } = await supabase
             .from('answer_key_rows')
             .select('client_row_id, row_data')
-            .eq('image_id', assignedTask.dbImageId);
+            .eq('image_id', assignedTask.dbImageId)
+            .order('created_at', { ascending: true });
         
         const answerKey: AnnotationRowData[] = (answerRowsData || []).map((dbRow: any) => ({
             id: dbRow.client_row_id, cells: dbRow.row_data
@@ -197,74 +267,7 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
   const handleImagePositionChange = (newPosition: { x: number; y: number }) => setImageSettings(prev => ({ ...prev, position: newPosition }));
   const handleResetImageSettings = () => setImageSettings(initialImageSettings);
   const handleToolSettingChange = (setting: keyof typeof toolSettings) => setToolSettings(prev => ({ ...prev, [setting]: !prev[setting] }));
-
-  /**
-   * Calculates score based on provided Supabase SQL functions logic.
-   * @param userRows The user's annotation rows.
-   * @param answerKeyRows The correct answer key rows.
-   * @returns An ExamResult object with score and other metrics.
-   */
-  const calculateScore = (userRows: AnnotationRowData[], answerKeyRows: AnnotationRowData[]): ExamResult => {
-      let totalAnswerKeyChars = 0;
-      let totalMatchingChars = 0;
-
-      // 1. Calculate total scorable characters from the answer key, mimicking `total_chars_in_row`.
-      for (const answerRow of answerKeyRows) {
-          for (const key in answerRow.cells) {
-              if (key === 'image_ref') continue;
-              const value = answerRow.cells[key]?.toString() || '';
-              if (value) {
-                  totalAnswerKeyChars += value.length;
-              }
-          }
-      }
-
-      // 2. For each answer key row, find matching characters from the corresponding user row,
-      // mimicking `calculate_matching_chars`. We align rows by index.
-      for (let i = 0; i < answerKeyRows.length; i++) {
-          const answerRowData = answerKeyRows[i].cells;
-          const userRowData = userRows[i]?.cells; // Use optional chaining in case user has fewer rows.
-
-          if (!userRowData) {
-              // User didn't provide this row, so 0 matching characters for it.
-              continue;
-          }
-          
-          // Iterate through the keys of the answer key row, as per the SQL function.
-          for (const key in answerRowData) {
-              if (key === 'image_ref') continue;
-              
-              const answerValue = answerRowData[key]?.toString() || '';
-              if (answerValue) { // Only score non-empty fields in the key.
-                  const userValue = userRowData[key]?.toString() || '';
-                  totalMatchingChars += commonPrefixLength(userValue, answerValue);
-              }
-          }
-      }
-
-      // If user submitted more rows than the answer key, they are ignored for scoring.
-      if (answerKeyRows.length === 0 || totalAnswerKeyChars === 0) {
-          // Handle case where answer key is empty or not found.
-          let totalUserChars = 0;
-          userRows.forEach(row => {
-              for(const key in row.cells) {
-                  if (key !== 'image_ref') {
-                      totalUserChars += (row.cells[key]?.toString() || '').length;
-                  }
-              }
-          });
-          return { score: 0, passed: false, userKeystrokes: totalUserChars, totalKeystrokes: 0 };
-      }
-
-      const score = (totalMatchingChars / totalAnswerKeyChars) * 100;
-
-      return {
-          score,
-          passed: score >= 90,
-          userKeystrokes: totalMatchingChars,
-          totalKeystrokes: totalAnswerKeyChars,
-      };
-  };
+  
 
   const handleInitialSubmit = async () => {
     setIsSubmittingToServer(true);
@@ -273,7 +276,8 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
         const { data: answerRowsData, error: fetchError } = await supabase
             .from('answer_key_rows')
             .select('client_row_id, row_data')
-            .eq('image_id', assignedTask.dbImageId);
+            .eq('image_id', assignedTask.dbImageId)
+            .order('created_at', { ascending: true });
 
         if (fetchError) {
             addToast({type: 'error', message: 'Could not fetch answer key to calculate score. Please try again.'});

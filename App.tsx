@@ -352,34 +352,42 @@ const AppContent: React.FC = () => {
     }
   }, [currentAnnotatorDbId, userId, addToast]);
 
-  const handleCancelRetake = useCallback(async () => {
-      if (!activeExamSession?.completionToOverride) return;
-      setLoading(true);
-      const { completionId, oldStatus, oldImageId, oldDuration, oldCompletedAt, oldRetakeCount } = activeExamSession.completionToOverride;
-      try {
-          const { error } = await supabase.from('user_exam_completions').update({
-              status: oldStatus,
-              assigned_image_id: oldImageId,
-              duration_seconds: oldDuration,
-              completed_at: oldCompletedAt,
-              retake_count: oldRetakeCount,
-          }).eq('id', completionId);
+  const handleCancelRetake = useCallback(() => {
+    if (!activeExamSession?.completionToOverride) return;
 
-          if (error) throw error;
-          
-          addToast({ type: 'info', message: 'Retake cancelled. Your previous score has been retained.' });
+    const { completionId, oldStatus, oldImageId, oldDuration, oldCompletedAt, oldRetakeCount } = activeExamSession.completionToOverride;
+
+    // Immediately perform the navigation for a responsive UI.
+    setActiveExamSession(null);
+    setCurrentScreen('USER_DASHBOARD');
+    safeReplaceState({}, '/dashboard');
+    addToast({ type: 'info', message: 'Retake cancelled. Restoring previous attempt...' });
+    
+    // Perform the database update in the background (fire and forget).
+    const revertExamState = async () => {
+      try {
+        const { error } = await supabase.from('user_exam_completions').update({
+            status: oldStatus,
+            assigned_image_id: oldImageId,
+            duration_seconds: oldDuration,
+            completed_at: oldCompletedAt,
+            retake_count: oldRetakeCount,
+        }).eq('id', completionId);
+
+        if (error) {
+            throw error;
+        }
+        // No success toast needed, the initial toast is enough.
       } catch (e: any) {
-          const formattedError = formatSupabaseError(e);
-          // Inform the user about the DB error, but assure them they are being exited.
-          addToast({ type: 'error', message: `Could not save cancellation to database: ${formattedError.message}. Your previous score is safe.` });
-      } finally {
-          // This block ALWAYS runs, guaranteeing an exit from the exam UI.
-          setActiveExamSession(null);
-          setCurrentScreen('USER_DASHBOARD');
-          safeReplaceState({}, '/dashboard');
-          setLoading(false);
+        // Only show an error toast if the background operation fails.
+        const formattedError = formatSupabaseError(e);
+        addToast({ type: 'error', message: `Failed to restore previous attempt on the server. Please check your scores. Error: ${formattedError.message}` });
       }
-  }, [activeExamSession, addToast, safeReplaceState]);
+    };
+    
+    revertExamState();
+
+}, [activeExamSession, addToast]);
 
   const handleExamFinish = useCallback(async (result: ExamResult, status: 'submitted' | 'timed_out') => {
       if (!activeExamSession) return;
@@ -429,7 +437,7 @@ const AppContent: React.FC = () => {
           safeReplaceState({}, '/dashboard');
       }
 
-  }, [activeExamSession, addToast, safeReplaceState]);
+  }, [activeExamSession, addToast]);
 
   const handleExamRetakeFromModal = useCallback(async () => {
     if (!activeExamSession) return;
