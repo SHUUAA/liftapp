@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 
 export type AppScreen =
@@ -27,6 +26,15 @@ export interface ImageTask {
   exam_id: number; // Foreign key to public.exams table
 }
 
+export interface CompletionToOverride {
+  completionId: number;
+  oldImageId: number;
+  oldStatus: 'submitted' | 'timed_out';
+  oldDuration: number | null;
+  oldCompletedAt: string | null;
+  oldRetakeCount: number;
+}
+
 // Represents an active, timed exam session for a user
 export interface ActiveExamSession {
   exam: Exam;
@@ -34,6 +42,7 @@ export interface ActiveExamSession {
   sessionEndTime: number; // UTC timestamp (e.g., from Date.now()) when the session expires
   annotatorDbId: number;
   userId: string;
+  completionToOverride?: CompletionToOverride | null;
 }
 
 export interface AnnotationColumn {
@@ -91,6 +100,7 @@ export interface UserExamScoreMetrics {
   total_answer_key_keystrokes?: number;
   score_percentage?: number; // Calculated client-side
   duration_seconds?: number; // Duration of the exam attempt in seconds
+  retakes?: number; // Number of retakes for this specific exam
 }
 
 export interface AnnotatorInfo {
@@ -103,6 +113,7 @@ export interface AnnotatorInfo {
   total_effective_user_keystrokes_overall?: number;
   total_answer_key_keystrokes_overall?: number;
   overall_score_percentage?: number; // Calculated client-side
+  total_retakes_overall?: number; // New field for total retakes
 
   // Per-exam scores: A dictionary where key is exam_code (e.g., 'baptism')
   per_exam_scores?: Record<string, UserExamScoreMetrics>;
@@ -141,6 +152,7 @@ export interface UserExamScore {
   percentage_score?: number; // Calculated on client: (total_effective_user_keystrokes / total_answer_key_keystrokes) * 100
   duration_seconds?: number; // Duration of the exam attempt in seconds
   completed_at?: string; // The date and time the exam was completed
+  retake_count: number; // Number of retakes
 }
 
 // Props for DashboardPage
@@ -159,11 +171,17 @@ export interface AdminDashboardPageProps {
   onAdminLogout: () => void;
 }
 
+// The info needed for the card to decide its state
+export interface ExamCompletionInfo {
+  isCompleted: boolean; // isCompleted means passed (score >= 90)
+  score: number | null;
+}
+
 // Props for ExamCard
 export interface ExamCardProps {
   exam: Exam;
   onSelectExam: (exam: Exam) => void;
-  isCompleted: boolean;
+  completionInfo?: ExamCompletionInfo; // New property
   activeSession: ActiveExamSession | null;
   onResumeExam: () => void;
 }
@@ -179,8 +197,9 @@ export interface ExamResult {
 export interface ExamPageProps {
   activeSession: ActiveExamSession;
   onBackToDashboard: () => void;
-  onExamFinish: () => void;
-  onRetake: (exam: Exam, excludedImageIds: number[]) => Promise<void>;
+  onExamFinish: (result: ExamResult, status: 'submitted' | 'timed_out') => void;
+  onRetake: () => Promise<void>;
+  onCancelRetake: () => void;
 }
 
 
@@ -198,6 +217,8 @@ export interface ExamHeaderProps {
   isSubmittingToServer: boolean;
   currentTaskForDisplay: ImageTask | undefined;
   displayStatus: DisplayStatusType;
+  isRetakeSession: boolean;
+  onCancelRetakeClick: () => void;
 }
 
 // Props for ImageViewer

@@ -1,5 +1,4 @@
 
-
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { AnnotationRowData, AnnotationCellData, ImageSettings, DisplayStatusType, ExamPageProps, ExamResult } from '../types';
 import { getColumnsForExam, EXAM_DURATION_SECONDS } from '../constants';
@@ -45,8 +44,8 @@ const commonPrefixLength = (s1: string = '', s2: string = ''): number => {
 };
 
 
-const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, onExamFinish, onRetake }) => {
-  const { userId, exam, annotatorDbId, assignedTask, sessionEndTime } = activeSession;
+const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, onExamFinish, onRetake, onCancelRetake }) => {
+  const { userId, exam, annotatorDbId, assignedTask, sessionEndTime, completionToOverride } = activeSession;
   
   const columnsForCurrentExam = useMemo(() => getColumnsForExam(exam.id), [exam.id]);
   const { addToast } = useToast();
@@ -64,7 +63,6 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
     submitAllExamAnnotations,
     persistDraft,
     currentTaskForDisplay,
-    currentExamDbId, 
   } = useExamData({ exam, annotatorDbId, assignedTask });
 
   const initialImageSettings: ImageSettings = { zoom: 20, contrast: 100, brightness: 100, position: { x: 0, y: -30 } };
@@ -91,53 +89,31 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
         setAttemptedImageIds(prev => [...prev, assignedTask.dbImageId]);
     }
   }, [assignedTask.dbImageId, attemptedImageIds]);
-
-  const recordExamCompletionInDb = async (durationSeconds: number, status: 'submitted' | 'timed_out') => {
-    if (!annotatorDbId || !currentExamDbId) {
-      addToast({type: 'error', message: "Could not record exam completion details due to missing identifiers."});
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('user_exam_completions')
-        .update({
-            completed_at: new Date().toISOString(),
-            duration_seconds: durationSeconds,
-            status: status 
-        })
-        .eq('annotator_id', annotatorDbId)
-        .eq('exam_id', currentExamDbId);
-
-      if (error) throw error;
-      console.log("Exam completion details (duration/status) updated successfully.");
-    } catch (e: any) {
-      const formattedError = formatSupabaseError(e);
-      addToast({type: 'error', message: `Your work was submitted, but an exception occurred while finalizing exam details: ${formattedError.message}`});
-    }
-  };
-
-  const closeExamSession = useCallback(async (status: 'submitted' | 'timed_out') => {
+  
+  const handleTimeout = useCallback(async () => {
     if (isExamClosingRef.current) return;
     isExamClosingRef.current = true;
-
-    const durationTakenSeconds = Math.floor((Date.now() - (sessionEndTime - EXAM_DURATION_SECONDS * 1000)) / 1000);
-
-    if (annotatorDbId && currentExamDbId) {
-      if (status === 'timed_out') {
-          await submitAllExamAnnotations();
-      }
-      await recordExamCompletionInDb(durationTakenSeconds, status);
+    
+    setDisplayStatus('Calculating score...');
+    const submissionSuccessful = await submitAllExamAnnotations();
+    if (submissionSuccessful) {
+        // Fetch answer key to calculate final score
+        const { data: answerRowsData } = await supabase
+            .from('answer_key_rows')
+            .select('client_row_id, row_data')
+            .eq('image_id', assignedTask.dbImageId);
+        
+        const answerKey: AnnotationRowData[] = (answerRowsData || []).map((dbRow: any) => ({
+            id: dbRow.client_row_id, cells: dbRow.row_data
+        }));
+        
+        const finalResult = calculateScore(rows, answerKey);
+        onExamFinish(finalResult, 'timed_out');
+    } else {
+        addToast({ type: 'error', message: 'Auto-submission failed. Please check your connection. Exam is closed.' });
+        onBackToDashboard();
     }
-    
-    let message = status === 'submitted'
-      ? `All work for the ${exam.name} exam has been submitted and the exam is now closed. Thank you!`
-      : `Time is up! All your work has been automatically submitted. The exam is now closed.`;
-      
-    addToast({ type: status === 'submitted' ? 'success' : 'warning', message, duration: 10000 });
-    
-    onExamFinish();
-  }, [annotatorDbId, exam.name, onExamFinish, sessionEndTime, recordExamCompletionInDb, currentExamDbId, submitAllExamAnnotations, addToast]);
+  }, [rows, onExamFinish, submitAllExamAnnotations, assignedTask.dbImageId, addToast, onBackToDashboard]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -146,9 +122,9 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
   
   useEffect(() => {
     if (timeLeft <= 0 && !isExamClosingRef.current) {
-        closeExamSession('timed_out');
+        handleTimeout();
     }
-  }, [timeLeft, closeExamSession]);
+  }, [timeLeft, handleTimeout]);
   
   useEffect(() => {
     setImageSettings(prev => ({...prev, position: { x: 0, y: -30 }}));
@@ -329,25 +305,25 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
   };
 
   const handleFinalSubmission = async () => {
-    if (isExamClosingRef.current) return;
+    if (isExamClosingRef.current || !examResult) return;
     setIsResultsModalOpen(false);
     setIsSubmittingToServer(true); 
     const submissionSuccessful = await submitAllExamAnnotations(); 
     if (submissionSuccessful) {
-        await closeExamSession('submitted');
+        onExamFinish(examResult, 'submitted');
     } else {
         setIsSubmittingToServer(false);
         addToast({type: 'error', message: `Submission failed. The exam remains open. Please try again or contact support.`});
     }
   };
 
-  const handleRetake = async () => {
+  const handleRetakeFromModal = async () => {
     setIsResultsModalOpen(false);
     setExamResult(null);
-    if(annotatorDbId) {
-        removeAnnotationsFromLocalStorage(annotatorDbId, exam.id, assignedTask.dbImageId);
+    if (annotatorDbId) {
+      removeAnnotationsFromLocalStorage(annotatorDbId, exam.id, assignedTask.dbImageId);
     }
-    await onRetake(exam, attemptedImageIds);
+    await onRetake();
   };
 
   const filledCells = useMemo(() => rows.reduce((acc, row) => acc + Object.values(row.cells).filter(cell => (cell?.toString() || '').trim() !== '').length, 0), [rows]);
@@ -414,11 +390,6 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
     return 'bg-slate-400';
   };
   
-  const handleBackToDashboardClick = () => {
-    if (isExamClosingRef.current) { onBackToDashboard(); return; }
-    onBackToDashboard();
-  };
-
   const renderResultsModalBody = () => {
     if (!examResult) return <p>Calculating score...</p>;
     const scoreColor = examResult.passed ? 'text-green-600' : 'text-red-600';
@@ -439,7 +410,7 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden">
       <ExamHeader
         userId={userId}
-        onBackToDashboardClick={handleBackToDashboardClick}
+        onBackToDashboardClick={onBackToDashboard}
         onHelpClick={() => setIsHelpModalOpen(true)}
         toolSettings={toolSettings}
         onToolSettingChange={handleToolSettingChange}
@@ -450,6 +421,8 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
         isSubmittingToServer={isSubmittingToServer}
         currentTaskForDisplay={currentTaskForDisplay}
         displayStatus={displayStatus}
+        isRetakeSession={!!completionToOverride}
+        onCancelRetakeClick={onCancelRetake}
       />
 
       <div className="flex-grow flex flex-col p-1 sm:p-2 gap-1 sm:gap-2 overflow-hidden">
@@ -489,10 +462,10 @@ const ExamPage: React.FC<ExamPageProps> = ({ activeSession, onBackToDashboard, o
         isOpen={isResultsModalOpen}
         onClose={() => examResult && !examResult.passed ? setIsResultsModalOpen(true) : setIsResultsModalOpen(false)}
         title="Exam Results"
-        confirmText={examResult?.passed ? "Submit Final Score" : undefined}
+        confirmText="Submit Final Score"
         onConfirm={handleFinalSubmission}
         cancelText={examResult && !examResult.passed ? "Retake Exam" : "Close"}
-        onCancelSecondary={examResult && !examResult.passed ? handleRetake : () => setIsResultsModalOpen(false)}
+        onCancelSecondary={examResult && !examResult.passed ? handleRetakeFromModal : () => setIsResultsModalOpen(false)}
         secondaryButtonClass={examResult && !examResult.passed ? 'bg-yellow-500 hover:bg-yellow-600 text-white' : undefined}
       >
         {renderResultsModalBody()}

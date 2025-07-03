@@ -2,8 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { EXAMS_DATA } from '../constants';
 import ExamCard from './ExamCard';
-import UserScoresTab from './UserScoresTab'; // New import
-import { Exam, DashboardPageProps, ActiveExamSession } from '../types';
+import UserScoresTab from './UserScoresTab';
+import { Exam, DashboardPageProps, ActiveExamSession, ExamCompletionInfo } from '../types';
 import { supabase } from '../utils/supabase/client';
 
 type DashboardTab = 'TASKS' | 'SCORES';
@@ -58,7 +58,7 @@ const ActiveExamBanner: React.FC<{ session: ActiveExamSession, onResume: () => v
 
 const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, onLogout, onSelectExam, activeSession, onResumeExam }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('TASKS');
-  const [completionStatus, setCompletionStatus] = useState<Map<string, boolean>>(new Map());
+  const [completionStatus, setCompletionStatus] = useState<Map<string, ExamCompletionInfo>>(new Map());
   const [isLoadingStatus, setIsLoadingStatus] = useState<boolean>(true);
 
   useEffect(() => {
@@ -70,31 +70,30 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, on
     const fetchCompletionStatus = async () => {
       setIsLoadingStatus(true);
       try {
-        const { data: completions, error } = await supabase
-          .from('user_exam_completions')
-          .select('status, exams(exam_code)')
-          .eq('annotator_id', annotatorDbId)
-          .in('status', ['submitted', 'timed_out']);
+        const { data, error: rpcError } = await supabase.rpc('get_annotator_exam_scores', {
+            p_annotator_db_id: annotatorDbId
+        });
 
-        if (error) {
-          console.error("Error fetching completion status:", error);
-          return;
-        }
+        if (rpcError) throw rpcError;
         
-        const completedExamCodes = new Set(
-          (completions || []).map(c => {
-            if (Array.isArray(c.exams)) return c.exams[0]?.exam_code;
-            return (c.exams as { exam_code: string } | null)?.exam_code;
-          }).filter(Boolean) as string[]
-        );
-        
-        const newStatus = new Map<string, boolean>();
-        EXAMS_DATA.forEach(exam => {
-          newStatus.set(exam.id, completedExamCodes.has(exam.id));
+        const newStatusMap = new Map<string, ExamCompletionInfo>();
+        (data || []).forEach((scoreRecord: any) => {
+            const total_effective = scoreRecord.total_effective_user_keystrokes || 0;
+            const total_possible = scoreRecord.total_answer_key_keystrokes || 0;
+            
+            const score = total_possible > 0 
+                ? parseFloat(((total_effective / total_possible) * 100).toFixed(1))
+                : 0;
+
+            newStatusMap.set(scoreRecord.exam_code, {
+                isCompleted: score >= 90, // isCompleted now means "passed"
+                score: score,
+            });
         });
         
-        setCompletionStatus(newStatus);
-      } catch (e) {
+        setCompletionStatus(newStatusMap);
+
+      } catch (e: any) {
         console.error("Exception while fetching completion status:", e);
       } finally {
         setIsLoadingStatus(false);
@@ -194,7 +193,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ userId, annotatorDbId, on
                     key={exam.id} 
                     exam={exam} 
                     onSelectExam={onSelectExam} 
-                    isCompleted={completionStatus.get(exam.id) || false}
+                    completionInfo={completionStatus.get(exam.id)}
                     activeSession={activeSession}
                     onResumeExam={onResumeExam}
                   />

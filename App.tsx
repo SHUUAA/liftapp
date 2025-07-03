@@ -1,12 +1,11 @@
 
-
 import React, { useState, useCallback, useEffect } from 'react';
 import LoginPage from './components/LoginPage';
 import DashboardPage from './components/DashboardPage';
 import ExamPage from './components/ExamPage';
 import AdminLoginPage from './components/admin/AdminLoginPage';
 import { AdminDashboardPage } from './components/admin/AdminDashboardPage';
-import { AppScreen, Exam, AdminCredentials, ImageTask, ActiveExamSession } from './types';
+import { AppScreen, Exam, AdminCredentials, ImageTask, ActiveExamSession, ExamResult } from './types';
 import { supabase } from './utils/supabase/client';
 import type { Session, User } from '@supabase/supabase-js';
 import { formatSupabaseError } from './utils/errorUtils';
@@ -23,6 +22,7 @@ const AppContent: React.FC = () => {
   
   const [adminUser, setAdminUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isSessionLoaded, setIsSessionLoaded] = useState<boolean>(false);
   const { addToast } = useToast();
 
   const isHistoryManipulationAllowed = window.location.protocol !== 'blob:';
@@ -62,6 +62,8 @@ const AppContent: React.FC = () => {
     } catch (e) {
       console.error("Error loading state from sessionStorage", e);
       sessionStorage.clear(); // Clear potentially corrupted storage
+    } finally {
+      setIsSessionLoaded(true);
     }
   }, []);
 
@@ -148,9 +150,11 @@ const AppContent: React.FC = () => {
 
   // This effect handles the initial routing when the application first loads.
   useEffect(() => {
-    handleRouteChange();
+    if (isSessionLoaded) {
+      handleRouteChange();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, [isSessionLoaded]); 
   
   // Listen to Supabase auth changes for admin
   useEffect(() => {
@@ -211,7 +215,7 @@ const AppContent: React.FC = () => {
         safePushState({}, '/dashboard');
       }
     }
-  }, [addToast, isHistoryManipulationAllowed]);
+  }, [addToast]);
 
   const handleLogout = useCallback(() => {
     setUserId(null);
@@ -220,7 +224,7 @@ const AppContent: React.FC = () => {
     sessionStorage.clear();
     setCurrentScreen('USER_LOGIN');
     safeReplaceState({}, '/login');
-  }, [isHistoryManipulationAllowed]);
+  }, []);
 
   const handleAdminLogin = useCallback(async ({ email, password }: AdminCredentials) => {
     setLoading(true);
@@ -248,106 +252,213 @@ const AppContent: React.FC = () => {
         return;
     }
     if (!exam.dbId) {
-        addToast({ type: 'error', message: `Exam configuration for '${exam.name}' is missing.` });
+        addToast({ type: 'error', message: `Could not find a database record for the '${exam.name}' exam.` });
         return;
     }
-
+    setLoading(true);
     try {
-        const { data, error } = await supabase.rpc('start_exam_and_assign_image', {
-            p_annotator_id: currentAnnotatorDbId,
-            p_exam_id: exam.dbId,
-        });
+        const { data: previousCompletionData, error: fetchError } = await supabase
+            .from('user_exam_completions')
+            .select('*')
+            .eq('annotator_id', currentAnnotatorDbId)
+            .eq('exam_id', exam.dbId)
+            .single();
 
-        if (error) throw error;
-        if (!data || data.length === 0) throw new Error("Could not retrieve an assigned image from the server.");
-
-        const assignedTask: ImageTask = {
-            dbImageId: data[0].db_image_id,
-            storage_path: data[0].storage_path,
-            original_filename: data[0].original_filename,
-            exam_id: data[0].exam_id,
-        };
+        if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = no rows found
+            throw new Error(`Could not check for previous exam attempts: ${fetchError.message}`);
+        }
         
-        const session: ActiveExamSession = {
-            exam,
-            assignedTask,
-            sessionEndTime: Date.now() + EXAM_DURATION_SECONDS * 1000,
-            annotatorDbId: currentAnnotatorDbId,
-            userId: userId,
-        };
+        const isRetake = !!previousCompletionData;
+
+        // Get a new image, excluding the one from the last attempt if this is a retake.
+        const excludedImageIds = isRetake ? [previousCompletionData.assigned_image_id] : [];
+        const { data: availableImages, error: findImageError } = await supabase
+            .from('images')
+            .select('id, storage_path, original_filename, exam_id')
+            .eq('exam_id', exam.dbId)
+            .not('id', 'in', `(${excludedImageIds.join(',') || '0'})`);
+
+        if (findImageError) throw findImageError;
+
+        let imageToAssign;
+        if (availableImages && availableImages.length > 0) {
+            imageToAssign = availableImages[Math.floor(Math.random() * availableImages.length)];
+        } else {
+             const { data: fallbackData, error: fallbackError } = await supabase.from('images').select('id, storage_path, original_filename, exam_id').eq('exam_id', exam.dbId);
+             if (fallbackError) throw fallbackError;
+             if (!fallbackData || fallbackData.length === 0) throw new Error("Could not retrieve an assigned image. No images are configured for this exam.");
+             imageToAssign = fallbackData[Math.floor(Math.random() * fallbackData.length)];
+             addToast({ type: 'warning', message: 'No new images available. Re-assigning a previously attempted image.' });
+        }
+        const assignedTask: ImageTask = { ...imageToAssign, dbImageId: imageToAssign.id };
+
+        let session: ActiveExamSession;
+
+        if (isRetake) {
+            const newRetakeCount = (previousCompletionData.retake_count || 0) + 1;
+            addToast({ type: 'info', message: `Starting Retake #${newRetakeCount}. Good luck!` });
+            
+            // Non-destructively update the completion record to a 'started' state for the retake.
+            const { error: updateError } = await supabase.from('user_exam_completions')
+                .update({
+                    assigned_image_id: imageToAssign.id,
+                    status: 'started',
+                    completed_at: null,
+                    duration_seconds: null,
+                    retake_count: newRetakeCount,
+                }).eq('id', previousCompletionData.id);
+            if (updateError) throw new Error(`Failed to prepare exam record for retake: ${updateError.message}`);
+
+            session = {
+                exam, assignedTask, annotatorDbId: currentAnnotatorDbId, userId,
+                sessionEndTime: Date.now() + EXAM_DURATION_SECONDS * 1000,
+                completionToOverride: {
+                    completionId: previousCompletionData.id,
+                    oldImageId: previousCompletionData.assigned_image_id,
+                    oldStatus: previousCompletionData.status,
+                    oldDuration: previousCompletionData.duration_seconds,
+                    oldCompletedAt: previousCompletionData.completed_at,
+                    oldRetakeCount: previousCompletionData.retake_count || 0,
+                }
+            };
+        } else {
+            // First attempt: create the record via RPC
+            const { data: rpcData, error: rpcError } = await supabase.rpc('start_exam_and_assign_image', {
+                p_annotator_id: currentAnnotatorDbId,
+                p_exam_id: exam.dbId,
+                p_excluded_image_ids: [],
+            });
+            if (rpcError) throw rpcError;
+            if (!rpcData || rpcData.length === 0) throw new Error("Could not create an exam session via RPC.");
+            
+            // The RPC assigns the image, so we use its response
+            const rpcAssignedTask: ImageTask = { dbImageId: rpcData[0].db_image_id, ...rpcData[0] };
+            session = {
+                exam, assignedTask: rpcAssignedTask, annotatorDbId: currentAnnotatorDbId, userId,
+                sessionEndTime: Date.now() + EXAM_DURATION_SECONDS * 1000,
+                completionToOverride: null
+            };
+        }
 
         setActiveExamSession(session);
         setCurrentScreen('USER_EXAM');
-        if (shouldPushState) {
-            safePushState({ examId: exam.id }, `/exam/${exam.id}`);
-        }
+        if (shouldPushState) safePushState({ examId: exam.id }, `/exam/${exam.id}`);
 
     } catch (e: any) {
         const formattedError = formatSupabaseError(e);
         addToast({ type: 'error', message: `Error starting exam session: ${formattedError.message}` });
+    } finally {
+        setLoading(false);
     }
-  }, [currentAnnotatorDbId, userId, addToast, isHistoryManipulationAllowed]);
+  }, [currentAnnotatorDbId, userId, addToast]);
 
-  const handleExamRetake = useCallback(async (exam: Exam, excludedImageIds: number[]) => {
-    if (!exam.dbId) {
-      addToast({ type: 'error', message: "Exam configuration is missing, cannot fetch new image." });
-      return;
-    }
-  
-    try {
-      const { data: availableImages, error } = await supabase
-        .from('images')
-        .select('id, storage_path, original_filename, exam_id')
-        .eq('exam_id', exam.dbId)
-        .not('id', 'in', `(${excludedImageIds.join(',')})`);
-  
-      if (error) throw error;
-  
-      if (!availableImages || availableImages.length === 0) {
-        addToast({ type: 'warning', message: 'No more images are available for this exam. Please submit your current score.', duration: 8000 });
-        return;
+  const handleCancelRetake = useCallback(async () => {
+      if (!activeExamSession?.completionToOverride) return;
+      setLoading(true);
+      const { completionId, oldStatus, oldImageId, oldDuration, oldCompletedAt, oldRetakeCount } = activeExamSession.completionToOverride;
+      try {
+          const { error } = await supabase.from('user_exam_completions').update({
+              status: oldStatus,
+              assigned_image_id: oldImageId,
+              duration_seconds: oldDuration,
+              completed_at: oldCompletedAt,
+              retake_count: oldRetakeCount,
+          }).eq('id', completionId);
+
+          if (error) throw error;
+          
+          addToast({ type: 'info', message: 'Retake cancelled. Your previous score has been retained.' });
+      } catch (e: any) {
+          const formattedError = formatSupabaseError(e);
+          // Inform the user about the DB error, but assure them they are being exited.
+          addToast({ type: 'error', message: `Could not save cancellation to database: ${formattedError.message}. Your previous score is safe.` });
+      } finally {
+          // This block ALWAYS runs, guaranteeing an exit from the exam UI.
+          setActiveExamSession(null);
+          setCurrentScreen('USER_DASHBOARD');
+          safeReplaceState({}, '/dashboard');
+          setLoading(false);
       }
-  
-      const newImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+  }, [activeExamSession, addToast, safeReplaceState]);
+
+  const handleExamFinish = useCallback(async (result: ExamResult, status: 'submitted' | 'timed_out') => {
+      if (!activeExamSession) return;
       
-      const newImageTask: ImageTask = {
-        dbImageId: newImage.id,
-        storage_path: newImage.storage_path,
-        original_filename: newImage.original_filename,
-        exam_id: newImage.exam_id,
-      };
-  
-      setActiveExamSession(prev => {
-        if (!prev) return null; // Should not happen
-        return { ...prev, assignedTask: newImageTask };
-      });
-  
-    } catch (e: any) {
-      const formattedError = formatSupabaseError(e);
-      addToast({ type: 'error', message: `Could not get a new image to retake: ${formattedError.message}` });
-    }
-  }, [addToast]);
+      const session = activeExamSession; // Capture session state
+      const durationTakenSeconds = Math.floor((Date.now() - (session.sessionEndTime - EXAM_DURATION_SECONDS * 1000)) / 1000);
+
+      // Finalize the record in the database
+      try {
+          let recordIdToUpdate: number;
+          
+          if (session.completionToOverride) {
+              // This was a retake, we are finalizing the override.
+              recordIdToUpdate = session.completionToOverride.completionId;
+              // Clean up the annotations from the old attempt.
+              await supabase.from('annotation_rows').delete().eq('image_id', session.completionToOverride.oldImageId);
+
+          } else {
+              // This was a first attempt. Find the 'started' record to update it.
+              const { data: completion, error: findError } = await supabase.from('user_exam_completions')
+                  .select('id').eq('annotator_id', session.annotatorDbId)
+                  .eq('exam_id', session.exam.dbId!)
+                  .eq('status', 'started').single();
+              if (findError) throw new Error("Could not find the initial exam record to finalize.");
+              recordIdToUpdate = completion.id;
+          }
+          
+          const { error: updateError } = await supabase.from('user_exam_completions').update({
+              status,
+              duration_seconds: durationTakenSeconds,
+              completed_at: new Date().toISOString()
+          }).eq('id', recordIdToUpdate);
+
+          if (updateError) throw updateError;
+          
+          const message = status === 'submitted'
+            ? `Exam submitted successfully! Score: ${result.score.toFixed(1)}%`
+            : `Time is up! Your work has been submitted. Score: ${result.score.toFixed(1)}%`;
+          addToast({ type: 'success', message, duration: 8000 });
+      
+      } catch (e: any) {
+          const formattedError = formatSupabaseError(e);
+          addToast({type: 'error', message: `Failed to finalize exam: ${formattedError.message}`});
+      } finally {
+          setActiveExamSession(null);
+          setCurrentScreen('USER_DASHBOARD');
+          safeReplaceState({}, '/dashboard');
+      }
+
+  }, [activeExamSession, addToast, safeReplaceState]);
+
+  const handleExamRetakeFromModal = useCallback(async () => {
+    if (!activeExamSession) return;
+    const examToRetake = activeExamSession.exam;
+    
+    // Finalize the current failed attempt before starting a new one.
+    // We create a minimal result object for this purpose.
+    const failedResult: ExamResult = { score: 0, passed: false, userKeystrokes: 0, totalKeystrokes: 0 };
+    await handleExamFinish(failedResult, 'submitted'); 
+    
+    // Then, immediately start a new retake session for the same exam
+    await handleSelectExam(examToRetake);
+
+  }, [activeExamSession, handleSelectExam, handleExamFinish]);
   
   const handleResumeExam = useCallback(() => {
     if (activeExamSession) {
       setCurrentScreen('USER_EXAM');
       safePushState({ examId: activeExamSession.exam.id }, `/exam/${activeExamSession.exam.id}`);
     }
-  }, [activeExamSession, isHistoryManipulationAllowed]);
-
-  const handleExamFinish = useCallback(() => {
-    setActiveExamSession(null);
-    setCurrentScreen('USER_DASHBOARD');
-    safeReplaceState({}, '/dashboard');
-  }, [isHistoryManipulationAllowed]);
+  }, [activeExamSession]);
 
   const handleBackToDashboard = useCallback(() => {
     setCurrentScreen('USER_DASHBOARD');
     safePushState({}, '/dashboard');
-  }, [isHistoryManipulationAllowed]);
+  }, []);
 
   const renderContent = () => {
-    if (loading) {
+    if (loading || !isSessionLoaded) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-slate-800">
           <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white"></div>
@@ -375,7 +486,8 @@ const AppContent: React.FC = () => {
             activeSession={activeExamSession}
             onBackToDashboard={handleBackToDashboard}
             onExamFinish={handleExamFinish}
-            onRetake={handleExamRetake}
+            onRetake={handleExamRetakeFromModal}
+            onCancelRetake={handleCancelRetake}
           />
         ) : null;
       case 'ADMIN_LOGIN':

@@ -5,6 +5,7 @@ import { ImageTask, DisplayStatusType, ExamHeaderProps } from '../../types'; // 
 const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>;
 const QuestionMarkCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" /></svg>;
 const ClockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+const CancelIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 
 
 const ExamHeader: React.FC<ExamHeaderProps> = ({
@@ -19,7 +20,9 @@ const ExamHeader: React.FC<ExamHeaderProps> = ({
   onSubmit,
   isSubmittingToServer,
   currentTaskForDisplay,
-  displayStatus
+  displayStatus,
+  isRetakeSession,
+  onCancelRetakeClick
 }) => {
 
   const formatTime = (seconds: number): string => {
@@ -28,16 +31,27 @@ const ExamHeader: React.FC<ExamHeaderProps> = ({
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const handleExitClick = () => {
+    if (isRetakeSession) {
+        onCancelRetakeClick();
+    } else {
+        onBackToDashboardClick();
+    }
+  };
+
+  const exitButtonText = isRetakeSession ? 'Cancel Retake' : 'Back to Dashboard';
+  const exitButtonIcon = isRetakeSession ? <CancelIcon /> : <ArrowLeftIcon />;
+  const exitButtonClassName = isRetakeSession
+    ? "flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
+    : "flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm";
+
+
   return (
     <header className="bg-slate-50 border-b border-slate-300 px-4 py-2 flex items-center justify-between shadow-sm flex-shrink-0">
       <div className="flex items-center space-x-3">
-        <button 
-          onClick={onBackToDashboardClick} 
-          className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm" 
-          aria-label="Back to Dashboard"
-        >
-          <ArrowLeftIcon />
-          <span>Back to Dashboard</span>
+        <button onClick={handleExitClick} className={exitButtonClassName} aria-label={exitButtonText}>
+            {exitButtonIcon}
+            <span>{exitButtonText}</span>
         </button>
         <span className="text-sm text-slate-600">User: <span className="font-medium text-slate-800">{userId}</span></span>
       </div>

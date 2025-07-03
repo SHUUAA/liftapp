@@ -55,6 +55,7 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
             : 0,
           duration_seconds: duration,
           completed_at: score.completed_at ? new Date(score.completed_at).toLocaleString() : 'N/A',
+          retake_count: score.retake_count || 0,
         };
       });
       setScores(processedScores);
@@ -114,6 +115,7 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
               <th scope="col" className="px-6 py-4 font-semibold">Exam Name</th>
               <th scope="col" className="px-6 py-4 font-semibold">Date Completed</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">BATCHES</th>
+              <th scope="col" className="px-6 py-4 font-semibold text-center">Retakes</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">EFFECTIVE KEYSTROKES</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">TOTAL KEYSTROKES</th>
               <th scope="col" className="px-6 py-4 font-semibold text-center">Duration</th>
@@ -126,6 +128,7 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
                 <td className="px-6 py-4 whitespace-nowrap font-medium text-slate-900">{score.exam_name}</td>
                 <td className="px-6 py-4 whitespace-nowrap">{score.completed_at}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">{score.images_attempted}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-center font-medium">{score.retake_count}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center text-green-600 font-semibold">{score.total_effective_user_keystrokes}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">{score.total_answer_key_keystrokes}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">{formatDuration(score.duration_seconds)}</td>

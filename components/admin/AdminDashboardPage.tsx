@@ -178,6 +178,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId,
                     total_images_attempted_overall: item.total_images_attempted_overall || 0,
                     total_effective_user_keystrokes_overall: total_effective_user_keystrokes_overall,
                     total_answer_key_keystrokes_overall: total_answer_key_keystrokes_overall,
+                    total_retakes_overall: item.total_retakes_overall || 0,
                     overall_score_percentage: (total_answer_key_keystrokes_overall > 0)
                         ? parseFloat(((total_effective_user_keystrokes_overall / total_answer_key_keystrokes_overall) * 100).toFixed(1))
                         : 0,
@@ -430,15 +431,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId,
         { key: 'total_images_attempted_overall', header: 'Overall Batches' },
         { key: 'total_effective_user_keystrokes_overall', header: 'Overall Effective Keystrokes' },
         { key: 'total_answer_key_keystrokes_overall', header: 'Overall Total Keystrokes' },
+        { key: 'total_retakes_overall', header: 'Overall Retakes'},
         { key: 'overall_score_percentage', header: 'Overall Score (%)' },
     ];
 
     EXAMS_DATA.forEach(exam => {
         columnsToExport.push({ key: `${exam.id}_images_attempted`, header: `${exam.name} Batches`, isExamSpecific: true, examCode: exam.id, metricKey: 'images_attempted' });
+        columnsToExport.push({ key: `${exam.id}_retakes`, header: `${exam.name} Retakes`, isExamSpecific: true, examCode: exam.id, metricKey: 'retakes' });
         columnsToExport.push({ key: `${exam.id}_effective_keystrokes`, header: `${exam.name} Effective Keystrokes`, isExamSpecific: true, examCode: exam.id, metricKey: 'total_effective_user_keystrokes' });
         columnsToExport.push({ key: `${exam.id}_total_keystrokes`, header: `${exam.name} Total Keystrokes`, isExamSpecific: true, examCode: exam.id, metricKey: 'total_answer_key_keystrokes' });
-        columnsToExport.push({ key: `${exam.id}_score_percentage`, header: `${exam.name} Score (%)`, isExamSpecific: true, examCode: exam.id, metricKey: 'score_percentage' });
         columnsToExport.push({ key: `${exam.id}_duration_seconds`, header: `${exam.name} Duration`, isExamSpecific: true, examCode: exam.id, metricKey: 'duration_seconds' });
+        columnsToExport.push({ key: `${exam.id}_score_percentage`, header: `${exam.name} Score (%)`, isExamSpecific: true, examCode: exam.id, metricKey: 'score_percentage' });
     });
 
     const csvData = convertToCSV(filteredAnnotators, columnsToExport);
@@ -591,15 +594,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId,
                       <th scope="col" className="px-3 py-3 sticky left-0 bg-slate-200 z-10">LiftApp User ID</th>
                       <th scope="col" className="px-3 py-3">Registered On</th>
                       <th scope="col" className="px-3 py-3 text-center">Overall Batches</th>
+                      <th scope="col" className="px-3 py-3 text-center">Overall Retakes</th>
                       <th scope="col" className="px-3 py-3 text-center" title="Overall Effective Keystrokes">Overall Effective Keystrokes</th>
                       <th scope="col" className="px-3 py-3 text-center" title="Overall Total Keystrokes">Overall Total Keystrokes</th>
                       <th scope="col" className="px-3 py-3 text-center">Overall Score (%)</th>
                       {EXAMS_DATA.map(exam => (
                         <React.Fragment key={exam.id}>
                           <th scope="col" className="px-3 py-3 text-center border-l border-slate-300">{exam.name} Batches</th>
+                          <th scope="col" className="px-3 py-3 text-center">{exam.name} Retakes</th>
                           <th scope="col" className="px-3 py-3 text-center" title="Effective Keystrokes">{exam.name} Effective Keystrokes</th>
                           <th scope="col" className="px-3 py-3 text-center" title="Total Keystrokes">{exam.name} Total Keystrokes</th>
-                           <th scope="col" className="px-3 py-3 text-center">{exam.name} Duration</th>
+                          <th scope="col" className="px-3 py-3 text-center">{exam.name} Duration</th>
                           <th scope="col" className="px-3 py-3 text-center">{exam.name} Score (%)</th>
                         </React.Fragment>
                       ))}
@@ -611,6 +616,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId,
                         <td className="px-3 py-3 font-medium text-slate-900 sticky left-0 bg-white hover:bg-slate-50 z-10">{annotator.liftapp_user_id}</td>
                         <td className="px-3 py-3">{annotator.created_at}</td>
                         <td className="px-3 py-3 text-center">{annotator.total_images_attempted_overall ?? 'N/A'}</td>
+                        <td className="px-3 py-3 text-center font-semibold">{annotator.total_retakes_overall ?? 0}</td>
                         <td className="px-3 py-3 text-center text-green-600 font-semibold">{annotator.total_effective_user_keystrokes_overall ?? 'N/A'}</td>
                         <td className="px-3 py-3 text-center">{annotator.total_answer_key_keystrokes_overall ?? 'N/A'}</td>
                         <td className="px-3 py-3 text-center">
@@ -629,6 +635,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ adminId,
                             return (
                                 <React.Fragment key={exam.id}>
                                     <td className="px-3 py-3 text-center border-l border-slate-300">{examScores?.images_attempted ?? 0}</td>
+                                    <td className="px-3 py-3 text-center font-semibold">{examScores?.retakes ?? 0}</td>
                                     <td className="px-3 py-3 text-center text-green-600 font-semibold">{examScores?.total_effective_user_keystrokes ?? 0}</td>
                                     <td className="px-3 py-3 text-center">{examScores?.total_answer_key_keystrokes ?? 0}</td>
                                     <td className="px-3 py-3 text-center">{formatDurationForAdmin(examScores?.duration_seconds)}</td>
