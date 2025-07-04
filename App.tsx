@@ -25,6 +25,36 @@ const AppContent: React.FC = () => {
   const [isSessionLoaded, setIsSessionLoaded] = useState<boolean>(false);
   const { addToast } = useToast();
 
+  useEffect(() => {
+    const handleContextmenu = (e: MouseEvent) => {
+        e.preventDefault();
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+        // Disable F12
+        if (e.key === 'F12' || e.keyCode === 123) {
+            e.preventDefault();
+        }
+        // Disable Ctrl+Shift+I
+        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.keyCode === 73)) {
+            e.preventDefault();
+        }
+        // Disable Ctrl+Shift+J
+        if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.keyCode === 74)) {
+            e.preventDefault();
+        }
+        // Disable Ctrl+U
+        if (e.ctrlKey && (e.key === 'U' || e.keyCode === 85)) {
+            e.preventDefault();
+        }
+    };
+    document.addEventListener('contextmenu', handleContextmenu);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+        document.removeEventListener('contextmenu', handleContextmenu);
+        document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const isHistoryManipulationAllowed = window.location.protocol !== 'blob:';
 
   const safePushState = (data: any, url: string) => {
