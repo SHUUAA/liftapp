@@ -16,6 +16,8 @@ import { supabase } from "../../utils/supabase/client";
 import { useToast } from "../../contexts/ToastContext";
 import Modal from "../common/Modal";
 import { formatSupabaseError } from "../../utils/errorUtils";
+import UserGrowthLineChart from "./charts/UserGrowthLineChart";
+import SubmissionsBarChart from "./charts/SubmissionsBarChart";
 
 const STORAGE_BUCKET_NAME = "exam-images";
 
@@ -70,6 +72,8 @@ const convertToCSV = (
 
         if (value === null || value === undefined) {
           value = "";
+        } else if (col.key === "created_at") {
+          value = new Date(value).toLocaleDateString();
         } else if (
           typeof value === "number" &&
           (col.key === "overall_score_percentage" ||
@@ -143,6 +147,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [isLoadingAnnotators, setIsLoadingAnnotators] =
     useState<boolean>(false);
   const [annotatorSearchTerm, setAnnotatorSearchTerm] = useState<string>("");
+
+  // New state for filters and sorting
+  const [filterDate, setFilterDate] = useState<string>("");
+  const [scoreFilter, setScoreFilter] = useState<string>("all");
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof AnnotatorInfo | null;
+    direction: "ascending" | "descending";
+  }>({ key: null, direction: "ascending" });
 
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
     null
@@ -301,7 +313,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         return {
           id: annotator.id,
           liftapp_user_id: annotator.liftapp_user_id,
-          created_at: new Date(annotator.created_at).toLocaleDateString(),
+          created_at: annotator.created_at, // Keep as ISO string for filtering/sorting
           total_images_attempted_overall: completionsForAnnotator.length,
           total_effective_user_keystrokes_overall,
           total_answer_key_keystrokes_overall,
@@ -343,6 +355,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         imagesCountResponse,
         submittedRowsCountResponse,
         { data: submissionsPerExamData, error: submissionsPerExamError },
+        {
+          data: annotatorsRegistrationData,
+          error: annotatorsRegistrationError,
+        },
       ] = await Promise.all([
         supabase.from("annotators").select("*", { count: "exact", head: true }),
         supabase.from("exams").select("*", { count: "exact", head: true }),
@@ -352,26 +368,45 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           .select("*", { count: "exact", head: true })
           .eq("is_submitted", true),
         supabase.rpc("get_submissions_per_exam"),
+        supabase
+          .from("annotators")
+          .select("created_at")
+          .order("created_at", { ascending: true }),
       ]);
 
-      if (
-        annotatorsCountResponse.error ||
-        examsCountResponse.error ||
-        imagesCountResponse.error ||
-        submittedRowsCountResponse.error ||
-        submissionsPerExamError
-      ) {
+      const errors = [
+        annotatorsCountResponse.error,
+        examsCountResponse.error,
+        imagesCountResponse.error,
+        submittedRowsCountResponse.error,
+        submissionsPerExamError,
+        annotatorsRegistrationError,
+      ].filter(Boolean);
+
+      if (errors.length > 0) {
         const errorMsg =
           "One or more analytics queries failed. Check console for details.";
-        console.error({
-          annotatorsError: annotatorsCountResponse.error,
-          examsError: examsCountResponse.error,
-          imagesError: imagesCountResponse.error,
-          submittedRowsError: submittedRowsCountResponse.error,
-          submissionsPerExamError,
-        });
+        console.error("Analytics Errors:", errors);
         throw new Error(errorMsg);
       }
+
+      // Process registration data for the line chart
+      const dailyCounts = new Map<string, number>();
+      (annotatorsRegistrationData || []).forEach((record) => {
+        if (record.created_at) {
+          const date = new Date(record.created_at).toISOString().split("T")[0]; // Get 'YYYY-MM-DD'
+          dailyCounts.set(date, (dailyCounts.get(date) || 0) + 1);
+        }
+      });
+
+      const sortedDates = Array.from(dailyCounts.keys()).sort(
+        (a, b) => new Date(a).getTime() - new Date(b).getTime()
+      );
+      let cumulativeCount = 0;
+      const annotatorRegistrations = sortedDates.map((date) => {
+        cumulativeCount += dailyCounts.get(date)!;
+        return { date: date, count: cumulativeCount };
+      });
 
       setAnalyticsData({
         totalAnnotators: annotatorsCountResponse.count || 0,
@@ -379,6 +414,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         totalImages: imagesCountResponse.count || 0,
         totalSubmittedAnnotationRows: submittedRowsCountResponse.count || 0,
         submissionsPerExam: submissionsPerExamData || [],
+        annotatorRegistrations: annotatorRegistrations,
       });
     } catch (e: any) {
       console.error("Exception fetching analytics:", e);
@@ -638,14 +674,68 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setShowAnswerKeyForm(true);
   };
 
-  const filteredAnnotators = useMemo(() => {
-    if (!annotatorSearchTerm) return allAnnotators;
-    return allAnnotators.filter((annotator) =>
-      annotator.liftapp_user_id
-        .toLowerCase()
-        .includes(annotatorSearchTerm.toLowerCase())
-    );
-  }, [allAnnotators, annotatorSearchTerm]);
+  const processedAnnotators = useMemo(() => {
+    let processableItems = [...allAnnotators];
+
+    // Apply search filter
+    if (annotatorSearchTerm) {
+      processableItems = processableItems.filter((annotator) =>
+        annotator.liftapp_user_id
+          .toLowerCase()
+          .includes(annotatorSearchTerm.toLowerCase())
+      );
+    }
+
+    // Apply date filter
+    if (filterDate) {
+      processableItems = processableItems.filter((annotator) => {
+        if (!annotator.created_at) return false;
+        // Get YYYY-MM-DD from the ISO string
+        const registrationDate = new Date(annotator.created_at)
+          .toISOString()
+          .split("T")[0];
+        return registrationDate === filterDate;
+      });
+    }
+
+    // Apply score filter
+    if (scoreFilter !== "all") {
+      processableItems = processableItems.filter((annotator) => {
+        const score = annotator.overall_score_percentage;
+        if (score === undefined || score === null) return false;
+        if (scoreFilter === ">=90") return score >= 90;
+        if (scoreFilter === "<90") return score < 90;
+        return true;
+      });
+    }
+
+    // Apply sorting
+    if (sortConfig.key) {
+      const { key, direction } = sortConfig;
+      processableItems.sort((a, b) => {
+        const aValue = a[key as keyof AnnotatorInfo] ?? 0;
+        const bValue = b[key as keyof AnnotatorInfo] ?? 0;
+
+        if (aValue < bValue) {
+          return direction === "ascending" ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return direction === "ascending" ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+
+    return processableItems;
+  }, [allAnnotators, annotatorSearchTerm, filterDate, scoreFilter, sortConfig]);
+
+  const requestSort = (key: keyof AnnotatorInfo) => {
+    let direction: "ascending" | "descending" = "ascending";
+    if (sortConfig.key === key && sortConfig.direction === "ascending") {
+      direction = "descending";
+    }
+    setSortConfig({ key, direction });
+  };
 
   const handleExportAnnotatorsToCSV = () => {
     const columnsToExport: {
@@ -716,7 +806,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       });
     });
 
-    const csvData = convertToCSV(filteredAnnotators, columnsToExport);
+    const csvData = convertToCSV(processedAnnotators, columnsToExport);
     const blob = new Blob([csvData], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     if (link.download !== undefined) {
@@ -736,6 +826,67 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       (key) => key.examCode === activeAnswerKeyExamCode
     );
   }, [fetchedAnswerKeys, activeAnswerKeyExamCode]);
+
+  const SortIcon: React.FC<{
+    direction: "ascending" | "descending" | null;
+  }> = ({ direction }) => {
+    if (!direction) {
+      return (
+        <svg
+          className="w-3 h-3 text-slate-400 inline-block"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M8 9l4-4 4 4m0 6l-4 4-4-4"
+          />
+        </svg>
+      );
+    }
+    if (direction === "ascending") {
+      return (
+        <svg
+          className="w-3 h-3 text-blue-500 inline-block"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M5 15l7-7 7 7"
+          />
+        </svg>
+      );
+    }
+    return (
+      <svg
+        className="w-3 h-3 text-blue-500 inline-block"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          d="M19 9l-7 7-7-7"
+        />
+      </svg>
+    );
+  };
+
+  const getSortIcon = (key: keyof AnnotatorInfo) => {
+    if (sortConfig.key !== key) {
+      return <SortIcon direction={null} />;
+    }
+    return <SortIcon direction={sortConfig.direction} />;
+  };
 
   const renderActiveTabContent = () => {
     switch (activeTab) {
@@ -894,32 +1045,88 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 onClick={handleExportAnnotatorsToCSV}
                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
                 disabled={
-                  isLoadingAnnotators || filteredAnnotators.length === 0
+                  isLoadingAnnotators || processedAnnotators.length === 0
                 }
               >
                 Export to CSV
               </button>
             </div>
-            <div className="mb-4">
-              <input
-                type="text"
-                placeholder="Search by LiftApp User ID..."
-                value={annotatorSearchTerm}
-                onChange={(e) => setAnnotatorSearchTerm(e.target.value)}
-                className="mt-1 block w-full md:w-1/2 lg:w-1/3 px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              />
+
+            {/* Filter and Sort Controls */}
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2 mb-4 p-4 bg-slate-100 rounded-md border border-slate-200">
+              <div>
+                <label
+                  htmlFor="annotatorSearch"
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Search User ID
+                </label>
+                <input
+                  id="annotatorSearch"
+                  type="text"
+                  placeholder="Search..."
+                  value={annotatorSearchTerm}
+                  onChange={(e) => setAnnotatorSearchTerm(e.target.value)}
+                  className="mt-1 block w-full md:w-40 px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="registeredOnDate"
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Registered On
+                </label>
+                <div className="flex items-center mt-1">
+                  <input
+                    id="registeredOnDate"
+                    type="date"
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  />
+                  <button
+                    onClick={() => setFilterDate("")}
+                    aria-label="Clear date filter"
+                    className="px-3 py-2 bg-slate-200 border border-l-0 border-slate-300 rounded-r-md text-slate-600 hover:bg-slate-300"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label
+                  htmlFor="scoreFilter"
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Overall Score
+                </label>
+                <select
+                  id="scoreFilter"
+                  value={scoreFilter}
+                  onChange={(e) => setScoreFilter(e.target.value)}
+                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                >
+                  <option value="all">All Scores</option>
+                  <option value=">=90">Passed (&gt;= 90%)</option>
+                  <option value="<90">Failed (&lt; 90%)</option>
+                </select>
+              </div>
             </div>
 
             {isLoadingAnnotators && (
               <p className="text-slate-500 italic">Loading annotators...</p>
             )}
-            {!isLoadingAnnotators && filteredAnnotators.length === 0 && (
-              <p className="text-slate-500 italic">
+            {!isLoadingAnnotators && processedAnnotators.length === 0 && (
+              <p className="text-slate-500 italic text-center py-8">
                 No annotators found
-                {annotatorSearchTerm ? " matching your search" : ""}.
+                {annotatorSearchTerm || filterDate || scoreFilter !== "all"
+                  ? " matching your criteria"
+                  : ""}
+                .
               </p>
             )}
-            {!isLoadingAnnotators && filteredAnnotators.length > 0 && (
+            {!isLoadingAnnotators && processedAnnotators.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs text-left text-slate-600 whitespace-nowrap">
                   <thead className="text-xs text-slate-700 uppercase bg-slate-200">
@@ -937,7 +1144,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                         Overall Batches
                       </th>
                       <th scope="col" className="px-3 py-3 text-center">
-                        Overall Retakes
+                        <button
+                          type="button"
+                          onClick={() => requestSort("total_retakes_overall")}
+                          className="flex items-center justify-center w-full gap-1 font-semibold text-slate-700 uppercase"
+                        >
+                          Overall Retakes {getSortIcon("total_retakes_overall")}
+                        </button>
                       </th>
                       <th
                         scope="col"
@@ -954,7 +1167,16 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                         Overall Total Keystrokes
                       </th>
                       <th scope="col" className="px-3 py-3 text-center">
-                        Overall Score (%)
+                        <button
+                          type="button"
+                          onClick={() =>
+                            requestSort("overall_score_percentage")
+                          }
+                          className="flex items-center justify-center w-full gap-1 font-semibold text-slate-700 uppercase"
+                        >
+                          Overall Score (%){" "}
+                          {getSortIcon("overall_score_percentage")}
+                        </button>
                       </th>
                       {EXAMS_DATA.map((exam) => (
                         <React.Fragment key={exam.id}>
@@ -992,7 +1214,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredAnnotators.map((annotator) => (
+                    {processedAnnotators.map((annotator) => (
                       <tr
                         key={annotator.id}
                         className="bg-white hover:bg-slate-50"
@@ -1000,7 +1222,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                         <td className="px-3 py-3 font-medium text-slate-900 sticky left-0 bg-white hover:bg-slate-50 z-10">
                           {annotator.liftapp_user_id}
                         </td>
-                        <td className="px-3 py-3">{annotator.created_at}</td>
+                        <td className="px-3 py-3">
+                          {new Date(annotator.created_at).toLocaleDateString()}
+                        </td>
                         <td className="px-3 py-3 text-center">
                           {annotator.total_images_attempted_overall ?? "N/A"}
                         </td>
@@ -1020,7 +1244,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                           annotator.overall_score_percentage !== null ? (
                             <span
                               className={`font-bold px-2 py-1 rounded-full text-xs ${
-                                annotator.overall_score_percentage >= 75
+                                annotator.overall_score_percentage >= 90
                                   ? "bg-green-100 text-green-700"
                                   : annotator.overall_score_percentage >= 50
                                   ? "bg-yellow-100 text-yellow-700"
@@ -1064,7 +1288,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                                 examScores.total_answer_key_keystrokes! > 0 ? (
                                   <span
                                     className={`font-bold px-2 py-1 rounded-full text-xs ${
-                                      examScores.score_percentage >= 75
+                                      examScores.score_percentage >= 90
                                         ? "bg-green-100 text-green-700"
                                         : examScores.score_percentage >= 50
                                         ? "bg-yellow-100 text-yellow-700"
@@ -1097,52 +1321,68 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               Application Analytics
             </h3>
             {isLoadingAnalytics && (
-              <p className="text-slate-500 italic">Loading analytics data...</p>
+              <div className="text-center p-8 text-slate-500 italic">
+                Loading analytics data...
+              </div>
             )}
             {!isLoadingAnalytics && !analyticsData && (
-              <p className="text-slate-500 italic">
+              <p className="text-center p-8 text-slate-500 italic">
                 Analytics data could not be loaded.
               </p>
             )}
             {!isLoadingAnalytics && analyticsData && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <AnalyticsCard
-                  title="Total Annotators"
-                  value={analyticsData.totalAnnotators.toString()}
-                />
-                <AnalyticsCard
-                  title="Total Exams Configured"
-                  value={analyticsData.totalExams.toString()}
-                />
-                <AnalyticsCard
-                  title="Total Images in System"
-                  value={analyticsData.totalImages.toString()}
-                />
-                <AnalyticsCard
-                  title="Total Submitted Annotation Rows"
-                  value={analyticsData.totalSubmittedAnnotationRows.toString()}
-                />
+              <div className="space-y-8">
+                {/* Top-level summary cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <AnalyticsCard
+                    title="Total Annotators"
+                    value={analyticsData.totalAnnotators.toString()}
+                  />
+                  <AnalyticsCard
+                    title="Total Exams Configured"
+                    value={analyticsData.totalExams.toString()}
+                  />
+                  <AnalyticsCard
+                    title="Total Images in System"
+                    value={analyticsData.totalImages.toString()}
+                  />
+                  <AnalyticsCard
+                    title="Total Submitted Annotation Rows"
+                    value={analyticsData.totalSubmittedAnnotationRows.toString()}
+                  />
+                </div>
 
-                {analyticsData.submissionsPerExam.length > 0 && (
-                  <div className="md:col-span-2 lg:col-span-3 p-4 bg-white rounded-lg shadow">
-                    <h4 className="text-md font-semibold text-slate-600 mb-3">
-                      Submissions per Exam
-                    </h4>
-                    <ul className="space-y-2 text-sm">
-                      {analyticsData.submissionsPerExam.map((examStat) => (
-                        <li
-                          key={examStat.name}
-                          className="flex justify-between items-center p-2 bg-slate-100 rounded"
-                        >
-                          <span>{examStat.name}</span>
-                          <span className="font-semibold">
-                            {examStat.submission_count}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {/* User Growth Line Chart */}
+                <div className="p-6 bg-white rounded-lg shadow-md">
+                  <h4 className="text-lg font-semibold text-slate-700 mb-4">
+                    Annotator Registrations Over Time
+                  </h4>
+                  {analyticsData.annotatorRegistrations.length > 0 ? (
+                    <UserGrowthLineChart
+                      data={analyticsData.annotatorRegistrations}
+                    />
+                  ) : (
+                    <p className="text-slate-500 italic text-center py-10">
+                      No registration data to display.
+                    </p>
+                  )}
+                </div>
+
+                {/* Submissions Per Exam Bar Chart */}
+                <div className="p-6 bg-white rounded-lg shadow-md">
+                  <h4 className="text-lg font-semibold text-slate-700 mb-4">
+                    Submissions per Exam
+                  </h4>
+                  {analyticsData.submissionsPerExam.length > 0 ? (
+                    <SubmissionsBarChart
+                      data={analyticsData.submissionsPerExam}
+                    />
+                  ) : (
+                    <p className="text-slate-500 italic text-center py-10">
+                      No submission data to display.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1156,9 +1396,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     title,
     value,
   }) => (
-    <div className="bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow">
-      <h4 className="text-md font-medium text-slate-500 mb-1">{title}</h4>
-      <p className="text-3xl font-bold text-slate-700">{value}</p>
+    <div className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow transform hover:-translate-y-1">
+      <h4 className="text-md font-medium text-slate-500 mb-1 truncate">
+        {title}
+      </h4>
+      <p className="text-4xl font-bold text-slate-800">{value}</p>
     </div>
   );
 
