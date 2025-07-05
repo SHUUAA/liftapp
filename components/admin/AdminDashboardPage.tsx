@@ -15,6 +15,7 @@ import AnswerKeyForm from "./AnswerKeyForm";
 import { supabase } from "../../utils/supabase/client";
 import { useToast } from "../../contexts/ToastContext";
 import Modal from "../common/Modal";
+import { formatSupabaseError } from "../../utils/errorUtils";
 
 const STORAGE_BUCKET_NAME = "exam-images";
 
@@ -124,7 +125,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   adminId,
   onAdminLogout,
 }) => {
-  const [activeTab, setActiveTab] = useState<AdminTab>("ANSWER_KEYS");
+  const [activeTab, setActiveTab] = useState<AdminTab>("ANNOTATORS");
   const { addToast } = useToast();
 
   const [fetchedAnswerKeys, setFetchedAnswerKeys] = useState<
@@ -224,75 +225,110 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const fetchAnnotators = useCallback(async () => {
     setIsLoadingAnnotators(true);
     try {
-      const { data, error } = await supabase.rpc(
-        "get_all_annotators_with_per_exam_scores"
+      // Fetch all necessary data in parallel for efficiency
+      const [annotatorsResponse, completionsResponse, examsResponse] =
+        await Promise.all([
+          supabase.from("annotators").select("id, liftapp_user_id, created_at"),
+          supabase
+            .from("user_exam_completions")
+            .select(
+              "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes"
+            )
+            .in("status", ["submitted", "timed_out"]),
+          supabase.from("exams").select("id, exam_code"),
+        ]);
+
+      // De-structure and handle potential errors
+      const { data: annotatorsData, error: annotatorsError } =
+        annotatorsResponse;
+      const { data: completionsData, error: completionsError } =
+        completionsResponse;
+      const { data: examsData, error: examsError } = examsResponse;
+
+      if (annotatorsError) throw annotatorsError;
+      if (completionsError) throw completionsError;
+      if (examsError) throw examsError;
+
+      // Create a mapping from database exam ID to the exam's code (e.g., 'baptism')
+      const examIdToCodeMap = new Map<number, string>();
+      (examsData || []).forEach((exam) =>
+        examIdToCodeMap.set(exam.id, exam.exam_code)
       );
 
-      if (error) {
-        console.error("Error fetching annotators with per-exam scores:", error);
-        addToast({
-          type: "error",
-          message: `Failed to load annotators: ${error.message}`,
-        });
-        setAllAnnotators([]);
-      } else {
-        setAllAnnotators(
-          (data || []).map((item: any) => {
-            const total_effective_user_keystrokes_overall =
-              item.total_effective_user_keystrokes_overall || 0;
-            const total_answer_key_keystrokes_overall =
-              item.total_answer_key_keystrokes_overall || 0;
-
-            const per_exam_scores_from_rpc = item.per_exam_scores || {};
-            const calculated_per_exam_scores = Object.entries(
-              per_exam_scores_from_rpc
-            ).reduce((acc, [examCode, scores]) => {
-              const typedScores = scores as UserExamScoreMetrics;
-              const effective =
-                typedScores.total_effective_user_keystrokes || 0;
-              const total = typedScores.total_answer_key_keystrokes || 0;
-              acc[examCode] = {
-                ...typedScores,
-                score_percentage:
-                  total > 0
-                    ? parseFloat(((effective / total) * 100).toFixed(1))
-                    : 0,
-              };
-              return acc;
-            }, {} as Record<string, UserExamScoreMetrics>);
-
-            return {
-              id: item.id,
-              liftapp_user_id: item.liftapp_user_id,
-              created_at: new Date(item.created_at).toLocaleDateString(),
-              total_images_attempted_overall:
-                item.total_images_attempted_overall || 0,
-              total_effective_user_keystrokes_overall:
-                total_effective_user_keystrokes_overall,
-              total_answer_key_keystrokes_overall:
-                total_answer_key_keystrokes_overall,
-              total_retakes_overall: item.total_retakes_overall || 0,
-              overall_score_percentage:
-                total_answer_key_keystrokes_overall > 0
-                  ? parseFloat(
-                      (
-                        (total_effective_user_keystrokes_overall /
-                          total_answer_key_keystrokes_overall) *
-                        100
-                      ).toFixed(1)
-                    )
-                  : 0,
-              per_exam_scores: calculated_per_exam_scores,
-            } as AnnotatorInfo;
-          })
+      // Process and aggregate the data on the client-side to ensure consistency
+      const annotatorsWithScores = (annotatorsData || []).map((annotator) => {
+        const completionsForAnnotator = (completionsData || []).filter(
+          (c) => c.annotator_id === annotator.id
         );
-      }
+
+        // Calculate overall statistics by summing up all of the user's completions
+        const total_effective_user_keystrokes_overall =
+          completionsForAnnotator.reduce(
+            (sum, c) => sum + (c.total_effective_keystrokes || 0),
+            0
+          );
+        const total_answer_key_keystrokes_overall =
+          completionsForAnnotator.reduce(
+            (sum, c) => sum + (c.total_answer_key_keystrokes || 0),
+            0
+          );
+        const total_retakes_overall = completionsForAnnotator.reduce(
+          (sum, c) => sum + (c.retake_count || 0),
+          0
+        );
+
+        // Process scores for each individual exam
+        const per_exam_scores: Record<string, UserExamScoreMetrics> = {};
+        completionsForAnnotator.forEach((comp) => {
+          const examCode = examIdToCodeMap.get(comp.exam_id);
+          if (examCode) {
+            const effective = comp.total_effective_keystrokes || 0;
+            const total = comp.total_answer_key_keystrokes || 0;
+            per_exam_scores[examCode] = {
+              images_attempted: 1, // One completion record per exam
+              retakes: comp.retake_count || 0,
+              total_effective_user_keystrokes: effective,
+              total_answer_key_keystrokes: total,
+              duration_seconds: comp.duration_seconds ?? undefined,
+              score_percentage:
+                total > 0
+                  ? parseFloat(((effective / total) * 100).toFixed(1))
+                  : 0,
+            };
+          }
+        });
+
+        return {
+          id: annotator.id,
+          liftapp_user_id: annotator.liftapp_user_id,
+          created_at: new Date(annotator.created_at).toLocaleDateString(),
+          total_images_attempted_overall: completionsForAnnotator.length,
+          total_effective_user_keystrokes_overall,
+          total_answer_key_keystrokes_overall,
+          total_retakes_overall,
+          overall_score_percentage:
+            total_answer_key_keystrokes_overall > 0
+              ? parseFloat(
+                  (
+                    (total_effective_user_keystrokes_overall /
+                      total_answer_key_keystrokes_overall) *
+                    100
+                  ).toFixed(1)
+                )
+              : 0,
+          per_exam_scores,
+        };
+      });
+
+      setAllAnnotators(annotatorsWithScores);
     } catch (e: any) {
       console.error("Exception fetching annotators:", e);
+      const formattedError = formatSupabaseError(e);
       addToast({
         type: "error",
-        message: `An unexpected error occurred: ${e.message}`,
+        message: `Failed to load annotator data: ${formattedError.message}`,
       });
+      setAllAnnotators([]);
     } finally {
       setIsLoadingAnnotators(false);
     }
