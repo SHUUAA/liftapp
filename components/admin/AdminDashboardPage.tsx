@@ -72,7 +72,10 @@ const convertToCSV = (
 
         if (value === null || value === undefined) {
           value = "";
-        } else if (col.key === "created_at") {
+        } else if (
+          col.key === "created_at" ||
+          col.key === "overall_completion_date"
+        ) {
           value = new Date(value).toLocaleDateString();
         } else if (
           typeof value === "number" &&
@@ -240,7 +243,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       // Fetch all necessary data in parallel for efficiency
       const [annotatorsResponse, completionsResponse, examsResponse] =
         await Promise.all([
-          supabase.from("annotators").select("id, liftapp_user_id, created_at"),
+          supabase
+            .from("annotators")
+            .select("id, liftapp_user_id, created_at, overall_completion_date"),
           supabase
             .from("user_exam_completions")
             .select(
@@ -314,6 +319,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           id: annotator.id,
           liftapp_user_id: annotator.liftapp_user_id,
           created_at: annotator.created_at, // Keep as ISO string for filtering/sorting
+          overall_completion_date: annotator.overall_completion_date,
           total_images_attempted_overall: completionsForAnnotator.length,
           total_effective_user_keystrokes_overall,
           total_answer_key_keystrokes_overall,
@@ -713,8 +719,18 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     if (sortConfig.key) {
       const { key, direction } = sortConfig;
       processableItems.sort((a, b) => {
-        const aValue = a[key as keyof AnnotatorInfo] ?? 0;
-        const bValue = b[key as keyof AnnotatorInfo] ?? 0;
+        let aValue =
+          a[key as keyof AnnotatorInfo] ??
+          (key === "overall_completion_date" ? null : 0);
+        let bValue =
+          b[key as keyof AnnotatorInfo] ??
+          (key === "overall_completion_date" ? null : 0);
+
+        // Handle date sorting properly
+        if (key === "overall_completion_date") {
+          if (aValue === null) return 1; // Nulls last
+          if (bValue === null) return -1;
+        }
 
         if (aValue < bValue) {
           return direction === "ascending" ? -1 : 1;
@@ -748,6 +764,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       { key: "id", header: "DB ID" },
       { key: "liftapp_user_id", header: "LiftApp User ID" },
       { key: "created_at", header: "Registered On" },
+      { key: "overall_completion_date", header: "Overall Completion Date" },
       { key: "total_images_attempted_overall", header: "Overall Batches" },
       {
         key: "total_effective_user_keystrokes_overall",
@@ -1140,6 +1157,16 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                       <th scope="col" className="px-3 py-3">
                         Registered On
                       </th>
+                      <th scope="col" className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => requestSort("overall_completion_date")}
+                          className="flex items-center justify-center w-full gap-1 font-semibold text-slate-700 uppercase"
+                        >
+                          Overall Completion Date{" "}
+                          {getSortIcon("overall_completion_date")}
+                        </button>
+                      </th>
                       <th scope="col" className="px-3 py-3 text-center">
                         Overall Batches
                       </th>
@@ -1224,6 +1251,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                         </td>
                         <td className="px-3 py-3">
                           {new Date(annotator.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="px-3 py-3 font-semibold text-indigo-600">
+                          {annotator.overall_completion_date ? (
+                            new Date(
+                              annotator.overall_completion_date
+                            ).toLocaleDateString()
+                          ) : (
+                            <span className="text-slate-400 italic">N/A</span>
+                          )}
                         </td>
                         <td className="px-3 py-3 text-center">
                           {annotator.total_images_attempted_overall ?? "N/A"}

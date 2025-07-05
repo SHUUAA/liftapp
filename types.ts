@@ -1,13 +1,13 @@
-import React from 'react';
+import React from "react";
 
 export type AppScreen =
-  | 'USER_LOGIN'
-  | 'USER_DASHBOARD'
-  | 'USER_EXAM'
-  | 'ADMIN_LOGIN'
-  | 'ADMIN_DASHBOARD';
+  | "USER_LOGIN"
+  | "USER_DASHBOARD"
+  | "USER_EXAM"
+  | "ADMIN_LOGIN"
+  | "ADMIN_DASHBOARD";
 
-export type AdminTab = 'ANSWER_KEYS' | 'ANNOTATORS' | 'ANALYTICS'; 
+export type AdminTab = "ANSWER_KEYS" | "ANNOTATORS" | "ANALYTICS";
 
 export interface Exam {
   id: string; // e.g., 'baptism', 'marriage' (corresponds to exam_code in DB)
@@ -28,7 +28,7 @@ export interface ImageTask {
 export interface CompletionToOverride {
   completionId: number;
   oldImageId: number;
-  oldStatus: 'submitted' | 'timed_out';
+  oldStatus: "submitted" | "timed_out";
   oldDuration: number | null;
   oldCompletedAt: string | null;
   oldRetakeCount: number;
@@ -49,7 +49,7 @@ export interface ActiveExamSession {
 export interface AnnotationColumn {
   id: string; // Unique identifier for the column, e.g., 'event_D'
   label: string; // Display name for the column header, e.g., 'Event_D'
-  type: 'text' | 'number' | 'date'; // Input type, can be expanded
+  type: "text" | "number" | "date"; // Input type, can be expanded
   width?: string; // Optional width for the column e.g. 'w-24', 'w-48'
 }
 
@@ -73,14 +73,14 @@ export interface ImageSettings {
 
 // For Admin Dashboard: Answer Key Management
 export interface AnswerKeyEntry {
-  examId: string;         // Corresponds to Exam.id (e.g., 'baptism') / exam_code
-  imageId: string;        // Client-side image identifier (e.g., original filename or a generated ref like storage_path)
-  imageFile?: File;       // The actual file object for new uploads
-  imageUrl?: string;      // URL for displaying an existing image (fetched from Supabase Storage)
+  examId: string; // Corresponds to Exam.id (e.g., 'baptism') / exam_code
+  imageId: string; // Client-side image identifier (e.g., original filename or a generated ref like storage_path)
+  imageFile?: File; // The actual file object for new uploads
+  imageUrl?: string; // URL for displaying an existing image (fetched from Supabase Storage)
   answers: AnnotationRowData[]; // Array of correct answer rows for the image
-  
-  dbImageId?: number;      // Primary key from public.images table
-  dbExamId?: number;       // Primary key from public.exams table
+
+  dbImageId?: number; // Primary key from public.images table
+  dbExamId?: number; // Primary key from public.exams table
 }
 
 // For displaying fetched answer key summaries in the admin dashboard list
@@ -108,7 +108,8 @@ export interface AnnotatorInfo {
   id: number; // PK from annotators table
   liftapp_user_id: string;
   created_at: string;
-  
+  overall_completion_date: string | null; // New field for storing the completion date
+
   // Overall scores
   total_images_attempted_overall?: number;
   total_effective_user_keystrokes_overall?: number;
@@ -119,7 +120,6 @@ export interface AnnotatorInfo {
   // Per-exam scores: A dictionary where key is exam_code (e.g., 'baptism')
   per_exam_scores?: Record<string, UserExamScoreMetrics>;
 }
-
 
 export interface AnalyticsData {
   totalAnnotators: number;
@@ -138,9 +138,9 @@ export interface AdminCredentials {
 
 // For Admin profile data from Supabase
 export interface AdminProfile {
-    id: string; // UUID from auth.users
-    role: string;
-    email?: string;
+  id: string; // UUID from auth.users
+  role: string;
+  email?: string;
 }
 
 // For User Dashboard: Scores Tab
@@ -199,19 +199,22 @@ export interface ExamResult {
 export interface ExamPageProps {
   activeSession: ActiveExamSession;
   onBackToDashboard: () => void;
-  onExamFinish: (result: ExamResult, status: 'submitted' | 'timed_out') => void;
+  onExamFinish: (result: ExamResult, status: "submitted" | "timed_out") => void;
   onRetake: () => Promise<void>;
   onCancelRetake: () => void;
 }
-
 
 // Props for ExamHeader
 export interface ExamHeaderProps {
   userId: string;
   onBackToDashboardClick: () => void;
   onHelpClick: () => void; // Added for help modal
-  toolSettings: { guideLine: boolean; firstCharCaps: boolean; specialChars: boolean };
-  onToolSettingChange: (setting: keyof ExamHeaderProps['toolSettings']) => void;
+  toolSettings: {
+    guideLine: boolean;
+    firstCharCaps: boolean;
+    specialChars: boolean;
+  };
+  onToolSettingChange: (setting: keyof ExamHeaderProps["toolSettings"]) => void;
   rowsCount: number;
   progress: number;
   timeLeft: number; // Added for the timer
@@ -226,7 +229,10 @@ export interface ExamHeaderProps {
 // Props for ImageViewer
 export interface ImageViewerProps {
   imageSettings: ImageSettings;
-  onImageSettingChange: (setting: keyof Omit<ImageSettings, 'position' | 'zoom'>, value: number) => void;
+  onImageSettingChange: (
+    setting: keyof Omit<ImageSettings, "position" | "zoom">,
+    value: number
+  ) => void;
   onImageZoomChange: (value: number) => void;
   onImagePositionChange: (newPosition: { x: number; y: number }) => void;
   onResetImageSettings: () => void;
@@ -252,7 +258,11 @@ export interface AnnotationTableProps {
   onAddRow: (focusNewRow?: boolean) => void;
   onDeleteRow: (rowIndexToDelete: number) => void;
   inputRefs: React.MutableRefObject<(HTMLInputElement | null)[][]>;
-  focusedCellRef: React.MutableRefObject<{ rowIndex: number; colId: string; inputElement: HTMLInputElement } | null>;
+  focusedCellRef: React.MutableRefObject<{
+    rowIndex: number;
+    colId: string;
+    inputElement: HTMLInputElement;
+  } | null>;
   displayStatus: DisplayStatusType;
   getDisplayStatusIcon: () => string;
   getDisplayStatusColor: () => string;
@@ -262,17 +272,17 @@ export interface AnnotationTableProps {
   onTableKeyDown: (event: React.KeyboardEvent<HTMLTableSectionElement>) => void;
 }
 
-export type DisplayStatusType = 
-  | '' 
-  | 'Loaded' 
-  | 'Unsaved changes' 
-  | 'Draft saved locally'
-  | 'Draft loaded locally' 
-  | 'Previously submitted data loaded' 
-  | 'Submitting...' 
-  | `Submitted at ${string}` 
-  | 'Error submitting'
-  | 'Calculating score...';
+export type DisplayStatusType =
+  | ""
+  | "Loaded"
+  | "Unsaved changes"
+  | "Draft saved locally"
+  | "Draft loaded locally"
+  | "Previously submitted data loaded"
+  | "Submitting..."
+  | `Submitted at ${string}`
+  | "Error submitting"
+  | "Calculating score...";
 
 // For recording exam completion in the database
 export interface UserExamCompletionRecord {
@@ -280,13 +290,13 @@ export interface UserExamCompletionRecord {
   exam_id: number;
   assigned_image_id: number; // The image assigned for this exam session
   duration_seconds: number;
-  status: 'started' | 'submitted' | 'timed_out';
+  status: "started" | "submitted" | "timed_out";
   total_effective_keystrokes?: number | null;
   total_answer_key_keystrokes?: number | null;
 }
 
 // For Toast notifications
-export type ToastType = 'success' | 'error' | 'info' | 'warning';
+export type ToastType = "success" | "error" | "info" | "warning";
 
 export interface ToastMessage {
   id: string;
