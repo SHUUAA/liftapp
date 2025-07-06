@@ -1,23 +1,42 @@
-
-import React, { useState } from 'react';
+import React, { useState } from "react";
 
 interface LoginPageProps {
   onLogin: (userId: string) => void;
-  // onNavigateToAdminLogin: () => void; // Removed prop
 }
 
+const USER_ID_PREFIXES = [
+  "PHBYUGH",
+  "PHBYUNG",
+  "PHBYUZA",
+  "PHLG",
+  "PHCB",
+  "PHCBIT",
+  "PHBYU",
+  "PHCEC",
+];
+
 const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
-  const [inputUserId, setInputUserId] = useState('');
-  const [error, setError] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = useState(USER_ID_PREFIXES[0]);
+  const [numericId, setNumericId] = useState("");
+  const [error, setError] = useState("");
+
+  const handleNumericInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    // Allow only numbers by stripping non-digit characters
+    const numericValue = value.replace(/\D/g, "");
+    setNumericId(numericValue);
+    if (error) setError("");
+  };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (inputUserId.trim() === '') {
-      setError('User ID cannot be empty.');
+    if (numericId.trim() === "") {
+      setError("Numeric ID part cannot be empty.");
       return;
     }
-    setError('');
-    onLogin(inputUserId.trim());
+    setError("");
+    const finalUserId = `${selectedPrefix}${numericId.trim()}`;
+    onLogin(finalUserId);
   };
 
   return (
@@ -25,32 +44,69 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       <div className="bg-white p-8 sm:p-10 rounded-xl shadow-2xl w-full max-w-md transform transition-all hover:scale-105 duration-300">
         <div className="text-center mb-8">
           {/* Using a generic document icon as placeholder */}
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-20 h-20 mx-auto text-blue-600 mb-4">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth="1.5"
+            stroke="currentColor"
+            className="w-20 h-20 mx-auto text-blue-600 mb-4"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+            />
           </svg>
           <h1 className="text-3xl font-bold text-slate-800">LiftApp</h1>
           <p className="text-slate-600 mt-2">Annotation Platform Login</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="userId" className="block text-sm font-medium text-slate-700 mb-1">
+            <label
+              htmlFor="userId"
+              className="block text-sm font-medium text-slate-700 mb-1"
+            >
               User ID
             </label>
-            <input
-              id="userId"
-              name="userId"
-              type="text"
-              value={inputUserId}
-              onChange={(e) => {
-                setInputUserId(e.target.value);
-                if (error) setError('');
-              }}
-              placeholder="Enter your User ID"
-              className="mt-1 block w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
-              aria-required="true"
-              aria-describedby={error ? "userId-error" : undefined}
-            />
-            {error && <p id="userId-error" className="mt-2 text-xs text-red-600">{error}</p>}
+            <div className="flex items-center mt-1">
+              <select
+                id="userIdPrefix"
+                name="userIdPrefix"
+                value={selectedPrefix}
+                onChange={(e) => setSelectedPrefix(e.target.value)}
+                className="block w-auto px-3 py-3 border border-r-0 border-slate-600 rounded-l-lg bg-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                aria-label="User ID Prefix"
+              >
+                {USER_ID_PREFIXES.map((prefix) => (
+                  <option
+                    key={prefix}
+                    value={prefix}
+                    className="text-black bg-white"
+                  >
+                    {prefix}
+                  </option>
+                ))}
+              </select>
+              <input
+                id="userId"
+                name="userId"
+                type="text" // Use text to control input via regex
+                pattern="[0-9]*" // Helps with mobile keyboards
+                inputMode="numeric" // Also helps with mobile keyboards
+                value={numericId}
+                onChange={handleNumericInputChange}
+                placeholder="Enter your number"
+                className="block w-full px-4 py-3 border border-slate-600 rounded-r-lg shadow-sm bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                aria-required="true"
+                aria-describedby={error ? "userId-error" : undefined}
+              />
+            </div>
+            {error && (
+              <p id="userId-error" className="mt-2 text-xs text-red-600">
+                {error}
+              </p>
+            )}
           </div>
           <div>
             <button
@@ -61,7 +117,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
             </button>
           </div>
         </form>
-        {/* Admin Access Button Removed from here */}
         <p className="mt-8 text-xs text-center text-slate-500">
           Annotation assignments will be available after login.
         </p>
