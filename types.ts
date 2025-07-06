@@ -102,6 +102,7 @@ export interface UserExamScoreMetrics {
   score_percentage?: number; // Calculated client-side
   duration_seconds?: number; // Duration of the exam attempt in seconds
   retakes?: number; // Number of retakes for this specific exam
+  completed_at?: string | null; // The date and time the exam was completed
 }
 
 export interface AnnotatorInfo {

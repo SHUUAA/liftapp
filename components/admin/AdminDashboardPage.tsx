@@ -38,7 +38,10 @@ const convertToCSV = (
     header: string;
     isExamSpecific?: boolean;
     examCode?: string;
-    metricKey?: keyof UserExamScoreMetrics | "duration_seconds";
+    metricKey?:
+      | keyof UserExamScoreMetrics
+      | "duration_seconds"
+      | "completed_at";
   }[]
 ) => {
   if (!data || data.length === 0) {
@@ -74,7 +77,8 @@ const convertToCSV = (
           value = "";
         } else if (
           col.key === "created_at" ||
-          col.key === "overall_completion_date"
+          col.key === "overall_completion_date" ||
+          (col.isExamSpecific && col.metricKey === "completed_at")
         ) {
           value = new Date(value).toLocaleDateString();
         } else if (
@@ -249,7 +253,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           supabase
             .from("user_exam_completions")
             .select(
-              "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes"
+              "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes, completed_at"
             )
             .in("status", ["submitted", "timed_out"]),
           supabase.from("exams").select("id, exam_code"),
@@ -311,6 +315,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 total > 0
                   ? parseFloat(((effective / total) * 100).toFixed(1))
                   : 0,
+              completed_at: comp.completed_at,
             };
           }
         });
@@ -759,7 +764,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       header: string;
       isExamSpecific?: boolean;
       examCode?: string;
-      metricKey?: keyof UserExamScoreMetrics | "duration_seconds";
+      metricKey?:
+        | keyof UserExamScoreMetrics
+        | "duration_seconds"
+        | "completed_at";
     }[] = [
       { key: "id", header: "DB ID" },
       { key: "liftapp_user_id", header: "LiftApp User ID" },
@@ -820,6 +828,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         isExamSpecific: true,
         examCode: exam.id,
         metricKey: "score_percentage",
+      });
+      columnsToExport.push({
+        key: `${exam.id}_completed_at`,
+        header: `${exam.name} Date Completed`,
+        isExamSpecific: true,
+        examCode: exam.id,
+        metricKey: "completed_at",
       });
     });
 
@@ -1236,6 +1251,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                           <th scope="col" className="px-3 py-3 text-center">
                             {exam.name} Score (%)
                           </th>
+                          <th scope="col" className="px-3 py-3 text-center">
+                            {exam.name} Date Completed
+                          </th>
                         </React.Fragment>
                       ))}
                     </tr>
@@ -1333,6 +1351,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                                   >
                                     {examScores.score_percentage.toFixed(1)}%
                                   </span>
+                                ) : (
+                                  <span className="text-slate-500 italic text-xs">
+                                    N/A
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {examScores?.completed_at ? (
+                                  new Date(
+                                    examScores.completed_at
+                                  ).toLocaleDateString()
                                 ) : (
                                   <span className="text-slate-500 italic text-xs">
                                     N/A
