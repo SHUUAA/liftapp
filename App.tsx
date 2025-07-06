@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import LoginPage from "./components/LoginPage";
 import DashboardPage from "./components/DashboardPage";
 import ExamPage from "./components/ExamPage";
@@ -121,6 +121,93 @@ const AppContent: React.FC = () => {
       console.error("Error saving session to sessionStorage", e);
     }
   }, [activeExamSession]);
+
+  /**
+   * Checks if an annotator has passed all available exams and sets their overall_completion_date if so.
+   * This is safe to call multiple times, as it exits early if a date is already set.
+   */
+  const checkAndSetOverallCompletionDate = useCallback(
+    async (annotatorId: number | null) => {
+      if (!annotatorId) return;
+
+      try {
+        const { data: annotatorData, error: annotatorError } = await supabase
+          .from("annotators")
+          .select("overall_completion_date")
+          .eq("id", annotatorId)
+          .single();
+
+        if (annotatorError && annotatorError.code !== "PGRST116") {
+          // Ignore "not found" error, just proceed
+          throw new Error(
+            `Could not fetch annotator status: ${annotatorError.message}`
+          );
+        }
+
+        // If date is already set, we don't need to do anything else.
+        if (annotatorData && annotatorData.overall_completion_date) {
+          return;
+        }
+
+        const { data: allExams, error: examsError } = await supabase
+          .from("exams")
+          .select("id");
+        if (examsError)
+          throw new Error(`Could not fetch exams: ${examsError.message}`);
+        if (!allExams) return;
+        const totalExamsCount = allExams.length;
+
+        const { data: userCompletions, error: completionsError } =
+          await supabase
+            .from("user_exam_completions")
+            .select(
+              "exam_id, total_effective_keystrokes, total_answer_key_keystrokes"
+            )
+            .eq("annotator_id", annotatorId)
+            .in("status", ["submitted", "timed_out"]);
+
+        if (completionsError)
+          throw new Error(
+            `Could not fetch user completions: ${completionsError.message}`
+          );
+
+        const passedExamIds = new Set<number>();
+        (userCompletions || []).forEach((completion) => {
+          const effective = completion.total_effective_keystrokes || 0;
+          const total = completion.total_answer_key_keystrokes || 0;
+          if (total > 0) {
+            const score = (effective / total) * 100;
+            if (score >= 90) {
+              passedExamIds.add(completion.exam_id);
+            }
+          }
+        });
+
+        if (totalExamsCount > 0 && passedExamIds.size >= totalExamsCount) {
+          const { error: updateError } = await supabase
+            .from("annotators")
+            .update({ overall_completion_date: new Date().toISOString() })
+            .eq("id", annotatorId);
+
+          if (updateError)
+            throw new Error(
+              `Could not update overall completion date: ${updateError.message}`
+            );
+
+          addToast({
+            type: "success",
+            message:
+              "🎉 Congratulations! You have passed all available exams. Your account is now fully complete.",
+            duration: 15000,
+          });
+        }
+      } catch (e: any) {
+        // This is a background check, so a console warning is better than a user-facing toast.
+        console.warn("Could not check for overall exam completion:", e.message);
+      }
+    },
+    [addToast]
+  );
 
   const handleSelectExam = useCallback(
     async (exam: Exam, shouldPushState = true) => {
@@ -372,13 +459,22 @@ const AppContent: React.FC = () => {
     };
   }, [handleRouteChange]);
 
-  // This effect handles the initial routing when the application first loads.
+  // This effect handles initial routing and backfills the overall completion date if needed.
   useEffect(() => {
     if (isSessionLoaded) {
       handleRouteChange();
+      if (currentAnnotatorDbId) {
+        // This check ensures that users who completed all exams before the feature
+        // was added will get their completion date backfilled on their next login.
+        checkAndSetOverallCompletionDate(currentAnnotatorDbId);
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSessionLoaded]);
+  }, [
+    isSessionLoaded,
+    currentAnnotatorDbId,
+    handleRouteChange,
+    checkAndSetOverallCompletionDate,
+  ]);
 
   // Listen to Supabase auth changes for admin
   useEffect(() => {
@@ -561,20 +657,16 @@ const AppContent: React.FC = () => {
           1000
       );
 
-      // Finalize the record in the database, now including the keystroke counts.
       try {
         let recordIdToUpdate: number;
 
         if (session.completionToOverride) {
-          // This was a retake, we are finalizing the override.
           recordIdToUpdate = session.completionToOverride.completionId;
-          // Clean up the annotations from the old attempt.
           await supabase
             .from("annotation_rows")
             .delete()
             .eq("image_id", session.completionToOverride.oldImageId);
         } else {
-          // This was a first attempt. Find the 'started' record to update it.
           const { data: completion, error: findError } = await supabase
             .from("user_exam_completions")
             .select("id")
@@ -609,6 +701,9 @@ const AppContent: React.FC = () => {
                 1
               )}%`;
         addToast({ type: "success", message, duration: 8000 });
+
+        // After successfully saving the score, check for overall completion.
+        checkAndSetOverallCompletionDate(session.annotatorDbId);
       } catch (e: any) {
         const formattedError = formatSupabaseError(e);
         addToast({
@@ -621,7 +716,7 @@ const AppContent: React.FC = () => {
         safeReplaceState({}, "/dashboard");
       }
     },
-    [activeExamSession, addToast]
+    [activeExamSession, addToast, checkAndSetOverallCompletionDate]
   );
 
   const handleExamRetakeFromModal = useCallback(async () => {
