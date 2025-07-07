@@ -604,16 +604,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     try {
       const { data: answerRowsData, error } = await supabase
         .from("answer_key_rows")
-        .select("row_data, client_row_id")
-        .eq("image_id", summary.dbImageId);
+        .select("id, row_data, client_row_id")
+        .eq("image_id", summary.dbImageId)
+        .order("id", { ascending: true });
 
       if (error) throw error;
 
       const answers: AnswerKeyEntry["answers"] = answerRowsData.map(
         (dbRow: any) => ({
-          id:
-            dbRow.client_row_id ||
-            `fallback_id_${Math.random().toString(36).substring(2, 9)}`,
+          id: dbRow.client_row_id || `db_id_${dbRow.id}`,
           cells: dbRow.row_data,
         })
       );
