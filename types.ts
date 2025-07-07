@@ -152,7 +152,7 @@ export interface UserExamScore {
   total_effective_user_keystrokes: number;
   total_answer_key_keystrokes: number;
   images_attempted: number;
-  percentage_score?: number; // Calculated on client: (total_effective_user_keystrokes / total_answer_key_keystrokes) * 100
+  percentage_score: number; // Calculated on client: (total_effective_user_keystrokes / total_answer_key_keystrokes) * 100
   duration_seconds?: number; // Duration of the exam attempt in seconds
   completed_at?: string; // The date and time the exam was completed
   retake_count: number; // Number of retakes

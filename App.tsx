@@ -292,25 +292,10 @@ const AppContent: React.FC = () => {
             message: `Starting Retake #${newRetakeCount}. Good luck!`,
           });
 
-          // Non-destructively update the completion record to a 'started' state for the retake.
-          // This clears the previous score data, preparing for the new attempt.
-          const { error: updateError } = await supabase
-            .from("user_exam_completions")
-            .update({
-              assigned_image_id: imageToAssign.id,
-              status: "started",
-              completed_at: null,
-              duration_seconds: null,
-              retake_count: newRetakeCount,
-              total_effective_keystrokes: null,
-              total_answer_key_keystrokes: null,
-            })
-            .eq("id", previousCompletionData.id);
-          if (updateError)
-            throw new Error(
-              `Failed to prepare exam record for retake: ${updateError.message}`
-            );
-
+          // Non-destructive session creation.
+          // DO NOT update the database record when a retake is merely *started*.
+          // The existing record remains as the "source of truth" for the last completed score
+          // until this retake attempt is finished via `handleExamFinish`.
           session = {
             exam,
             assignedTask,
@@ -594,57 +579,13 @@ const AppContent: React.FC = () => {
   const handleCancelRetake = useCallback(() => {
     if (!activeExamSession?.completionToOverride) return;
 
-    const {
-      completionId,
-      oldStatus,
-      oldImageId,
-      oldDuration,
-      oldCompletedAt,
-      oldRetakeCount,
-      oldEffectiveKeystrokes,
-      oldTotalKeystrokes,
-    } = activeExamSession.completionToOverride;
-
     // Immediately perform the navigation for a responsive UI.
     setActiveExamSession(null);
     setCurrentScreen("USER_DASHBOARD");
     safeReplaceState({}, "/dashboard");
-    addToast({
-      type: "info",
-      message: "Retake cancelled. Restoring previous attempt...",
-    });
+    addToast({ type: "info", message: "Retake cancelled." });
 
-    // Perform the database update in the background to restore the old score and state.
-    const revertExamState = async () => {
-      try {
-        const { error } = await supabase
-          .from("user_exam_completions")
-          .update({
-            status: oldStatus,
-            assigned_image_id: oldImageId,
-            duration_seconds: oldDuration,
-            completed_at: oldCompletedAt,
-            retake_count: oldRetakeCount,
-            total_effective_keystrokes: oldEffectiveKeystrokes,
-            total_answer_key_keystrokes: oldTotalKeystrokes,
-          })
-          .eq("id", completionId);
-
-        if (error) {
-          throw error;
-        }
-        // No success toast needed, the initial toast is enough.
-      } catch (e: any) {
-        // Only show an error toast if the background operation fails.
-        const formattedError = formatSupabaseError(e);
-        addToast({
-          type: "error",
-          message: `Failed to restore previous attempt on the server. Please check your scores. Error: ${formattedError.message}`,
-        });
-      }
-    };
-
-    revertExamState();
+    // No database update is needed because starting the retake was non-destructive.
   }, [activeExamSession, addToast]);
 
   const handleExamFinish = useCallback(
@@ -659,9 +600,13 @@ const AppContent: React.FC = () => {
 
       try {
         let recordIdToUpdate: number;
+        let newRetakeCount: number | undefined;
 
         if (session.completionToOverride) {
           recordIdToUpdate = session.completionToOverride.completionId;
+          newRetakeCount =
+            (session.completionToOverride.oldRetakeCount || 0) + 1;
+          // Clean up annotations from the old attempt image before saving new ones
           await supabase
             .from("annotation_rows")
             .delete()
@@ -681,15 +626,23 @@ const AppContent: React.FC = () => {
           recordIdToUpdate = completion.id;
         }
 
+        const updatePayload: { [key: string]: any } = {
+          status,
+          duration_seconds: durationTakenSeconds,
+          completed_at: new Date().toISOString(),
+          total_effective_keystrokes: result.userKeystrokes,
+          total_answer_key_keystrokes: result.totalKeystrokes,
+          // Update assigned_image_id to the one used in this attempt
+          assigned_image_id: session.assignedTask.dbImageId,
+        };
+
+        if (newRetakeCount !== undefined) {
+          updatePayload.retake_count = newRetakeCount;
+        }
+
         const { error: updateError } = await supabase
           .from("user_exam_completions")
-          .update({
-            status,
-            duration_seconds: durationTakenSeconds,
-            completed_at: new Date().toISOString(),
-            total_effective_keystrokes: result.userKeystrokes,
-            total_answer_key_keystrokes: result.totalKeystrokes,
-          })
+          .update(updatePayload)
           .eq("id", recordIdToUpdate);
 
         if (updateError) throw updateError;
