@@ -5,12 +5,15 @@ interface LoginPageProps {
 }
 
 const USER_ID_PREFIXES = [
+  "PHBYUCG",
   "PHBYUGH",
+  "PHBYUMG",
   "PHBYUNG",
   "PHBYUZA",
   "PHLG",
   "PHCB",
   "PHCBIT",
+  "PHCITU",
   "PHBYU",
   "PHCEC",
 ];
