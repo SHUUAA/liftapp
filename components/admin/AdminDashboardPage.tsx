@@ -213,7 +213,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         return;
       }
 
-      const summariesWithUrls = data.map((summary: any) => {
+      if (!data) {
+        setFetchedAnswerKeys([]);
+        return;
+      }
+
+      const summariesWithUrls = data.map((summary) => {
         const { data: urlData } = supabase.storage
           .from(STORAGE_BUCKET_NAME)
           .getPublicUrl(summary.storage_path);
@@ -245,36 +250,26 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setIsLoadingAnnotators(true);
     try {
       // Fetch all necessary data in parallel for efficiency
-      const [annotatorsResponse, completionsResponse, examsResponse] =
-        await Promise.all([
-          supabase
-            .from("annotators")
-            .select("id, liftapp_user_id, created_at, overall_completion_date"),
-          supabase
-            .from("user_exam_completions")
-            .select(
-              "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes, completed_at"
-            )
-            .in("status", ["submitted", "timed_out"]),
-          supabase.from("exams").select("id, exam_code"),
-        ]);
+      const [annotatorsResponse, completionsResponse] = await Promise.all([
+        supabase
+          .from("annotators")
+          .select("id, liftapp_user_id, created_at, overall_completion_date"),
+        supabase
+          .from("user_exam_completions")
+          .select(
+            "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes, completed_at, exams(exam_code, name)"
+          )
+          .in("status", ["submitted", "timed_out"]),
+      ]);
 
       // De-structure and handle potential errors
       const { data: annotatorsData, error: annotatorsError } =
         annotatorsResponse;
       const { data: completionsData, error: completionsError } =
         completionsResponse;
-      const { data: examsData, error: examsError } = examsResponse;
 
       if (annotatorsError) throw annotatorsError;
       if (completionsError) throw completionsError;
-      if (examsError) throw examsError;
-
-      // Create a mapping from database exam ID to the exam's code (e.g., 'baptism')
-      const examIdToCodeMap = new Map<number, string>();
-      (examsData || []).forEach((exam) =>
-        examIdToCodeMap.set(exam.id, exam.exam_code)
-      );
 
       // Process and aggregate the data on the client-side to ensure consistency
       const annotatorsWithScores = (annotatorsData || []).map((annotator) => {
@@ -301,7 +296,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         // Process scores for each individual exam
         const per_exam_scores: Record<string, UserExamScoreMetrics> = {};
         completionsForAnnotator.forEach((comp) => {
-          const examCode = examIdToCodeMap.get(comp.exam_id);
+          const examCode = comp.exams?.exam_code;
           if (examCode) {
             const effective = comp.total_effective_keystrokes || 0;
             const total = comp.total_answer_key_keystrokes || 0;
@@ -320,11 +315,60 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           }
         });
 
+        // --- OVERALL COMPLETION DATE LOGIC ---
+        // If the user has passed all exams (score >= 90 for each exam),
+        // set the overall_completion_date to the latest completed_at among the 4 exams
+        let shouldSetOverallCompletionDate = false;
+        let latestCompletionDate: string | null = null;
+        if (EXAMS_DATA.length > 0) {
+          const passedAll = EXAMS_DATA.every((exam) => {
+            const score = per_exam_scores[exam.id]?.score_percentage;
+            return score !== undefined && score >= 90;
+          });
+          if (passedAll) {
+            // Find the latest completed_at among the 4 exams
+            const dates = EXAMS_DATA.map(
+              (exam) => per_exam_scores[exam.id]?.completed_at
+            )
+              .filter(Boolean)
+              .map((d) => new Date(d as string));
+            if (dates.length === EXAMS_DATA.length) {
+              latestCompletionDate = new Date(
+                Math.max(...dates.map((d) => d.getTime()))
+              ).toISOString();
+              shouldSetOverallCompletionDate = true;
+            }
+          }
+        }
+
+        // If the DB value is missing and we should set it, update the DB
+        if (
+          !annotator.overall_completion_date &&
+          shouldSetOverallCompletionDate &&
+          latestCompletionDate
+        ) {
+          // Fire and forget, don't await
+          supabase
+            .from("annotators")
+            .update({ overall_completion_date: latestCompletionDate })
+            .eq("id", annotator.id)
+            .then(({ error }) => {
+              if (error) {
+                console.error(
+                  "Failed to update overall_completion_date for annotator",
+                  annotator.id,
+                  error
+                );
+              }
+            });
+        }
+
         return {
           id: annotator.id,
           liftapp_user_id: annotator.liftapp_user_id,
           created_at: annotator.created_at, // Keep as ISO string for filtering/sorting
-          overall_completion_date: annotator.overall_completion_date,
+          overall_completion_date:
+            annotator.overall_completion_date || latestCompletionDate,
           total_images_attempted_overall: completionsForAnnotator.length,
           total_effective_user_keystrokes_overall,
           total_answer_key_keystrokes_overall,
@@ -539,7 +583,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             // New image
             const { data, error: insertImageError } = await supabase
               .from("images")
-              .insert(imageRecord)
+              .insert([imageRecord])
               .select("id")
               .single();
             if (insertImageError) throw insertImageError;
@@ -564,7 +608,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         }
 
         const answerRowsToInsert = keyData.answers.map((answerRow) => ({
-          image_id: imageDbId,
+          image_id: imageDbId!,
           admin_profile_id: currentAdminProfile.id,
           row_data: answerRow.cells,
           client_row_id: answerRow.id,
@@ -610,7 +654,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
       if (error) throw error;
 
-      const answers: AnswerKeyEntry["answers"] = answerRowsData.map(
+      const answers: AnswerKeyEntry["answers"] = (answerRowsData || []).map(
         (dbRow: any) => ({
           id: dbRow.client_row_id || `db_id_${dbRow.id}`,
           cells: dbRow.row_data,
@@ -1338,7 +1382,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                               <td className="px-3 py-3 text-center">
                                 {examScores?.score_percentage !== undefined &&
                                 examScores?.score_percentage !== null &&
-                                examScores.total_answer_key_keystrokes! > 0 ? (
+                                (examScores.total_answer_key_keystrokes ?? 0) >
+                                  0 ? (
                                   <span
                                     className={`font-bold px-2 py-1 rounded-full text-xs ${
                                       examScores.score_percentage >= 90
