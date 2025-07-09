@@ -35,6 +35,7 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
           `
             id, exam_id, completed_at, retake_count, duration_seconds,
             total_effective_keystrokes, total_answer_key_keystrokes,
+            score_percentage,
             exams ( exam_code, name )
         `
         )
@@ -71,14 +72,8 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
           total_answer_key_keystrokes: total_answer_key_keystrokes,
           images_attempted: 1, // A completion record represents one "batch" or attempt.
           percentage_score:
-            total_answer_key_keystrokes > 0
-              ? parseFloat(
-                  (
-                    (total_effective_user_keystrokes /
-                      total_answer_key_keystrokes) *
-                    100
-                  ).toFixed(1)
-                )
+            score.score_percentage !== null
+              ? parseFloat(score.score_percentage.toFixed(1))
               : 0,
           duration_seconds: score.duration_seconds ?? undefined,
           completed_at: score.completed_at

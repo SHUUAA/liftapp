@@ -160,9 +160,7 @@ const AppContent: React.FC = () => {
         const { data: userCompletions, error: completionsError } =
           await supabase
             .from("user_exam_completions")
-            .select(
-              "exam_id, total_effective_keystrokes, total_answer_key_keystrokes"
-            )
+            .select("exam_id, score_percentage")
             .eq("annotator_id", annotatorId)
             .in("status", ["submitted", "timed_out"]);
 
@@ -173,13 +171,9 @@ const AppContent: React.FC = () => {
 
         const passedExamIds = new Set<number>();
         (userCompletions || []).forEach((completion) => {
-          const effective = completion.total_effective_keystrokes || 0;
-          const total = completion.total_answer_key_keystrokes || 0;
-          if (total > 0) {
-            const score = (effective / total) * 100;
-            if (score >= 90) {
-              passedExamIds.add(completion.exam_id);
-            }
+          const score = completion.score_percentage || 0;
+          if (score >= 90) {
+            passedExamIds.add(completion.exam_id);
           }
         });
 

@@ -98,8 +98,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           .select(
             `
                 exam_id,
-                total_effective_keystrokes,
-                total_answer_key_keystrokes,
+                score_percentage,
                 completed_at,
                 exams (
                     exam_code
@@ -122,14 +121,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
         const newStatusMap = new Map<string, ExamCompletionInfo>();
         Array.from(latestStatusMap.values()).forEach((scoreRecord: any) => {
-          const total_effective = scoreRecord.total_effective_keystrokes || 0;
-          const total_possible = scoreRecord.total_answer_key_keystrokes || 0;
-
           const score =
-            total_possible > 0
-              ? parseFloat(
-                  ((total_effective / total_possible) * 100).toFixed(1)
-                )
+            scoreRecord.score_percentage !== null
+              ? parseFloat(scoreRecord.score_percentage.toFixed(1))
               : 0;
 
           if (scoreRecord.exams?.exam_code) {
