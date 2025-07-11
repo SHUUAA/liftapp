@@ -25,16 +25,16 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
   const handleNumericInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    // Allow only numbers by stripping non-digit characters
-    const numericValue = value.replace(/\D/g, "");
+    // Allow only numbers by stripping non-digit characters and limit to 4 digits
+    const numericValue = value.replace(/\D/g, "").slice(0, 4);
     setNumericId(numericValue);
     if (error) setError("");
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (numericId.trim() === "") {
-      setError("Numeric ID part cannot be empty.");
+    if (numericId.trim().length !== 4) {
+      setError("Please enter exactly 4 digits for your ID.");
       return;
     }
     setError("");
@@ -97,9 +97,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 type="text" // Use text to control input via regex
                 pattern="[0-9]*" // Helps with mobile keyboards
                 inputMode="numeric" // Also helps with mobile keyboards
+                maxLength={4}
                 value={numericId}
                 onChange={handleNumericInputChange}
-                placeholder="Enter your number"
+                placeholder="Enter your 4-digit number"
                 className="block w-full px-4 py-3 border border-slate-600 rounded-r-lg shadow-sm bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
                 aria-required="true"
                 aria-describedby={error ? "userId-error" : undefined}
