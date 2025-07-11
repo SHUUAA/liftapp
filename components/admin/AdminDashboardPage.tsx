@@ -160,6 +160,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [filterDate, setFilterDate] = useState<string>("");
   const [filterCompletionDate, setFilterCompletionDate] = useState<string>("");
   const [scoreFilter, setScoreFilter] = useState<string>("all");
+  const [filterBatches, setFilterBatches] = useState<string>("all");
   const [sortConfig, setSortConfig] = useState<{
     key: keyof AnnotatorInfo | null;
     direction: "ascending" | "descending";
@@ -778,6 +779,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       });
     }
 
+    // Apply batches filter
+    if (filterBatches !== "all") {
+      const numBatches = parseInt(filterBatches, 10);
+      processableItems = processableItems.filter(
+        (annotator) =>
+          (annotator.total_images_attempted_overall ?? 0) === numBatches
+      );
+    }
+
     // Apply sorting
     if (sortConfig.key) {
       const { key, direction } = sortConfig;
@@ -812,6 +822,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     filterDate,
     filterCompletionDate,
     scoreFilter,
+    filterBatches,
     sortConfig,
   ]);
 
@@ -823,7 +834,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [annotatorSearchTerm, filterDate, filterCompletionDate, scoreFilter]);
+  }, [
+    annotatorSearchTerm,
+    filterDate,
+    filterCompletionDate,
+    scoreFilter,
+    filterBatches,
+  ]);
 
   const requestSort = (key: keyof AnnotatorInfo) => {
     let direction: "ascending" | "descending" = "ascending";
@@ -1270,6 +1287,26 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                   <option value="<90">Failed (&lt; 90%)</option>
                 </select>
               </div>
+              <div>
+                <label
+                  htmlFor="batchesFilter"
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Overall Batches
+                </label>
+                <select
+                  id="batchesFilter"
+                  value={filterBatches}
+                  onChange={(e) => setFilterBatches(e.target.value)}
+                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                >
+                  <option value="all">All Batches</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
             </div>
 
             {isLoadingAnnotators && (
@@ -1281,7 +1318,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 {annotatorSearchTerm ||
                 filterDate ||
                 filterCompletionDate ||
-                scoreFilter !== "all"
+                scoreFilter !== "all" ||
+                filterBatches !== "all"
                   ? " matching your criteria"
                   : ""}
                 .

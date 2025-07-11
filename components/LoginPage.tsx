@@ -33,8 +33,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (numericId.trim().length !== 4) {
-      setError("Please enter exactly 4 digits for your ID.");
+    const idLength = numericId.trim().length;
+    if (idLength < 3 || idLength > 4) {
+      setError("Please enter 3 or 4 digits for your ID.");
       return;
     }
     setError("");
@@ -100,7 +101,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 maxLength={4}
                 value={numericId}
                 onChange={handleNumericInputChange}
-                placeholder="Enter your 4-digit number"
+                placeholder="Enter your 3 or 4-digit number"
                 className="block w-full px-4 py-3 border border-slate-600 rounded-r-lg shadow-sm bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
                 aria-required="true"
                 aria-describedby={error ? "userId-error" : undefined}
