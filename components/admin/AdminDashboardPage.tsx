@@ -10,7 +10,7 @@ import {
   UserExamScoreMetrics,
   AdminDashboardPageProps,
 } from "../../types";
-import { EXAMS_DATA } from "../../constants";
+import { EXAMS_DATA, USER_ID_PREFIXES } from "../../constants";
 import AnswerKeyForm from "./AnswerKeyForm";
 import { supabase } from "../../utils/supabase/client";
 import { useToast } from "../../contexts/ToastContext";
@@ -161,6 +161,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [filterCompletionDate, setFilterCompletionDate] = useState<string>("");
   const [scoreFilter, setScoreFilter] = useState<string>("all");
   const [filterBatches, setFilterBatches] = useState<string>("all");
+  const [filterPrefix, setFilterPrefix] = useState<string>("all");
   const [sortConfig, setSortConfig] = useState<{
     key: keyof AnnotatorInfo | null;
     direction: "ascending" | "descending";
@@ -745,6 +746,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       );
     }
 
+    // Apply prefix filter
+    if (filterPrefix !== "all") {
+      processableItems = processableItems.filter((annotator) =>
+        annotator.liftapp_user_id.startsWith(filterPrefix)
+      );
+    }
+
     // Apply registration date filter
     if (filterDate) {
       processableItems = processableItems.filter((annotator) => {
@@ -823,6 +831,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     filterCompletionDate,
     scoreFilter,
     filterBatches,
+    filterPrefix,
     sortConfig,
   ]);
 
@@ -840,6 +849,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     filterCompletionDate,
     scoreFilter,
     filterBatches,
+    filterPrefix,
   ]);
 
   const requestSort = (key: keyof AnnotatorInfo) => {
@@ -1223,6 +1233,27 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               </div>
               <div>
                 <label
+                  htmlFor="prefixFilter"
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  User Prefix
+                </label>
+                <select
+                  id="prefixFilter"
+                  value={filterPrefix}
+                  onChange={(e) => setFilterPrefix(e.target.value)}
+                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                >
+                  <option value="all">All Prefixes</option>
+                  {USER_ID_PREFIXES.map((prefix) => (
+                    <option key={prefix} value={prefix}>
+                      {prefix}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
                   htmlFor="registeredOnDate"
                   className="block text-xs font-medium text-slate-600"
                 >
@@ -1319,7 +1350,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 filterDate ||
                 filterCompletionDate ||
                 scoreFilter !== "all" ||
-                filterBatches !== "all"
+                filterBatches !== "all" ||
+                filterPrefix !== "all"
                   ? " matching your criteria"
                   : ""}
                 .

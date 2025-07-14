@@ -1,22 +1,9 @@
 import React, { useState } from "react";
+import { USER_ID_PREFIXES } from "../constants";
 
 interface LoginPageProps {
   onLogin: (userId: string) => void;
 }
-
-const USER_ID_PREFIXES = [
-  "PHBYUCG",
-  "PHBYUGH",
-  "PHBYUMG",
-  "PHBYUNG",
-  "PHBYUZA",
-  "PHLG",
-  "PHCB",
-  "PHCBIT",
-  "PHCITU",
-  "PHBYU",
-  "PHCEC",
-];
 
 const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [selectedPrefix, setSelectedPrefix] = useState(USER_ID_PREFIXES[0]);
