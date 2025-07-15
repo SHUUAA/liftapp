@@ -283,31 +283,32 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           (c) => c.annotator_id === annotator.id
         );
 
-        // Calculate overall statistics by summing up all of the user's completions
-        const total_effective_user_keystrokes_overall =
-          completionsForAnnotator.reduce(
-            (sum, c) => sum + (c.total_effective_keystrokes || 0),
-            0
-          );
-        const total_answer_key_keystrokes_overall =
-          completionsForAnnotator.reduce(
-            (sum, c) => sum + (c.total_answer_key_keystrokes || 0),
-            0
-          );
-        const total_retakes_overall = completionsForAnnotator.reduce(
-          (sum, c) => sum + (c.retake_count || 0),
-          0
-        );
+        // Find the latest completion for each exam
+        const latestCompletionsMap = new Map<number, any>();
+        completionsForAnnotator.forEach((completion) => {
+          if (completion.completed_at) {
+            // Only consider completed exams
+            const existing = latestCompletionsMap.get(completion.exam_id);
+            if (
+              !existing ||
+              new Date(completion.completed_at) >
+                new Date(existing.completed_at)
+            ) {
+              latestCompletionsMap.set(completion.exam_id, completion);
+            }
+          }
+        });
+        const latestCompletions = Array.from(latestCompletionsMap.values());
 
-        // Process scores for each individual exam
+        // Process scores for each individual exam based on the latest attempts
         const per_exam_scores: Record<string, UserExamScoreMetrics> = {};
-        completionsForAnnotator.forEach((comp) => {
+        latestCompletions.forEach((comp) => {
           const examCode = comp.exams?.exam_code;
           if (examCode) {
             const effective = comp.total_effective_keystrokes || 0;
             const total = comp.total_answer_key_keystrokes || 0;
             per_exam_scores[examCode] = {
-              images_attempted: 1, // One completion record per exam
+              images_attempted: 1, // 1 latest attempt
               retakes: comp.retake_count || 0,
               total_effective_user_keystrokes: effective,
               total_answer_key_keystrokes: total,
@@ -320,6 +321,33 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             };
           }
         });
+
+        // Calculate overall statistics based on the LATEST completions
+        const total_effective_user_keystrokes_overall =
+          latestCompletions.reduce(
+            (sum, c) => sum + (c.total_effective_keystrokes || 0),
+            0
+          );
+        const total_answer_key_keystrokes_overall = latestCompletions.reduce(
+          (sum, c) => sum + (c.total_answer_key_keystrokes || 0),
+          0
+        );
+        const total_retakes_overall = latestCompletions.reduce(
+          (sum, c) => sum + (c.retake_count || 0),
+          0
+        );
+
+        // New overall percentage logic as requested
+        const totalScorePercentageSum = Object.values(per_exam_scores).reduce(
+          (sum, score) => sum + (score.score_percentage || 0),
+          0
+        );
+        const overall_score_percentage =
+          EXAMS_DATA.length > 0
+            ? parseFloat(
+                (totalScorePercentageSum / EXAMS_DATA.length).toFixed(1)
+              )
+            : 0;
 
         // --- OVERALL COMPLETION DATE LOGIC ---
         // If the user has passed all exams (score >= 90 for each exam),
@@ -375,20 +403,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           created_at: annotator.created_at, // Keep as ISO string for filtering/sorting
           overall_completion_date:
             annotator.overall_completion_date || latestCompletionDate,
-          total_images_attempted_overall: completionsForAnnotator.length,
+          total_images_attempted_overall: latestCompletions.length, // Number of unique exams attempted
           total_effective_user_keystrokes_overall,
           total_answer_key_keystrokes_overall,
           total_retakes_overall,
-          overall_score_percentage:
-            total_answer_key_keystrokes_overall > 0
-              ? parseFloat(
-                  (
-                    (total_effective_user_keystrokes_overall /
-                      total_answer_key_keystrokes_overall) *
-                    100
-                  ).toFixed(1)
-                )
-              : 0,
+          overall_score_percentage,
           per_exam_scores,
         };
       });
