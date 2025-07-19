@@ -1,4 +1,10 @@
-import React, { useState, useCallback, useEffect, useMemo } from "react";
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
 import {
   AnswerKeyEntry,
   Exam,
@@ -186,6 +192,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     confirmText: "Confirm",
   });
 
+  const dataFetchStatus = useRef({
+    answerKeys: false,
+    annotators: false,
+    analytics: false,
+  });
+
   useEffect(() => {
     const fetchAdminProfile = async () => {
       const {
@@ -206,6 +218,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
   const fetchAnswerKeySummaries = useCallback(async () => {
     setIsLoadingAnswerKeys(true);
+    dataFetchStatus.current.answerKeys = true;
     try {
       const { data, error } = await supabase.rpc("get_answer_key_summaries");
 
@@ -254,6 +267,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
   const fetchAnnotators = useCallback(async () => {
     setIsLoadingAnnotators(true);
+    dataFetchStatus.current.annotators = true;
     try {
       // Fetch all necessary data in parallel for efficiency
       const [annotatorsResponse, completionsResponse] = await Promise.all([
@@ -428,6 +442,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
   const fetchAnalyticsData = useCallback(async () => {
     setIsLoadingAnalytics(true);
+    dataFetchStatus.current.analytics = true;
     try {
       const [
         annotatorsCountResponse,
@@ -508,11 +523,23 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   }, [addToast]);
 
   useEffect(() => {
-    if (activeTab === "ANSWER_KEYS" && !showAnswerKeyForm) {
+    // This effect ensures data is loaded once when a tab is first opened.
+    // Subsequent data refreshes must be triggered manually via the "Refresh" buttons.
+    if (
+      activeTab === "ANSWER_KEYS" &&
+      !showAnswerKeyForm &&
+      !dataFetchStatus.current.answerKeys
+    ) {
       fetchAnswerKeySummaries();
-    } else if (activeTab === "ANNOTATORS") {
+    } else if (
+      activeTab === "ANNOTATORS" &&
+      !dataFetchStatus.current.annotators
+    ) {
       fetchAnnotators();
-    } else if (activeTab === "ANALYTICS") {
+    } else if (
+      activeTab === "ANALYTICS" &&
+      !dataFetchStatus.current.analytics
+    ) {
       fetchAnalyticsData();
     }
   }, [
@@ -1068,13 +1095,23 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 Manage Exam Answer Keys
               </h3>
               {!showAnswerKeyForm && (
-                <button
-                  onClick={handleCreateNewAnswerKey}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-                  disabled={isLoadingAnswerKeys}
-                >
-                  Create New Answer Key
-                </button>
+                <div className="flex items-center gap-x-3">
+                  <button
+                    onClick={fetchAnswerKeySummaries}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-wait"
+                    disabled={isLoadingAnswerKeys}
+                  >
+                    <RefreshIcon spinning={isLoadingAnswerKeys} />
+                    Refresh
+                  </button>
+                  <button
+                    onClick={handleCreateNewAnswerKey}
+                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                    disabled={isLoadingAnswerKeys}
+                  >
+                    Create New Answer Key
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1213,7 +1250,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               </h3>
               <div className="flex items-center gap-x-3">
                 <button
-                  onClick={() => fetchAnnotators()}
+                  onClick={fetchAnnotators}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-wait"
                   disabled={isLoadingAnnotators}
                 >
@@ -1648,9 +1685,19 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       case "ANALYTICS":
         return (
           <div className="p-6 bg-slate-50 rounded-lg shadow">
-            <h3 className="text-xl font-semibold text-slate-700 mb-6">
-              Application Analytics
-            </h3>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold text-slate-700">
+                Application Analytics
+              </h3>
+              <button
+                onClick={fetchAnalyticsData}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-wait"
+                disabled={isLoadingAnalytics}
+              >
+                <RefreshIcon spinning={isLoadingAnalytics} />
+                Refresh
+              </button>
+            </div>
             {isLoadingAnalytics && (
               <div className="text-center p-8 text-slate-500 italic">
                 Loading analytics data...
