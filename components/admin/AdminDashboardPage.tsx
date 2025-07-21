@@ -165,6 +165,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   // New state for filters and sorting
   const [filterDate, setFilterDate] = useState<string>("");
   const [filterCompletionDate, setFilterCompletionDate] = useState<string>("");
+  const [completionStatusFilter, setCompletionStatusFilter] =
+    useState<string>("all");
   const [scoreFilter, setScoreFilter] = useState<string>("all");
   const [filterBatches, setFilterBatches] = useState<string>("all");
   const [filterPrefix, setFilterPrefix] = useState<string>("all");
@@ -822,6 +824,19 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       });
     }
 
+    // Apply completion status filter
+    if (completionStatusFilter !== "all") {
+      processableItems = processableItems.filter((annotator) => {
+        if (completionStatusFilter === "completed") {
+          return !!annotator.overall_completion_date;
+        }
+        if (completionStatusFilter === "not_completed") {
+          return !annotator.overall_completion_date;
+        }
+        return true;
+      });
+    }
+
     // Apply score filter
     if (scoreFilter !== "all") {
       processableItems = processableItems.filter((annotator) => {
@@ -875,6 +890,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     annotatorSearchTerm,
     filterDate,
     filterCompletionDate,
+    completionStatusFilter,
     scoreFilter,
     filterBatches,
     filterPrefix,
@@ -893,6 +909,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     annotatorSearchTerm,
     filterDate,
     filterCompletionDate,
+    completionStatusFilter,
     scoreFilter,
     filterBatches,
     filterPrefix,
@@ -1358,6 +1375,24 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               </div>
               <div>
                 <label
+                  htmlFor="completionStatusFilter"
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Completion Status
+                </label>
+                <select
+                  id="completionStatusFilter"
+                  value={completionStatusFilter}
+                  onChange={(e) => setCompletionStatusFilter(e.target.value)}
+                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="completed">With Completion Date</option>
+                  <option value="not_completed">No Completion Date</option>
+                </select>
+              </div>
+              <div>
+                <label
                   htmlFor="scoreFilter"
                   className="block text-xs font-medium text-slate-600"
                 >
@@ -1405,6 +1440,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 {annotatorSearchTerm ||
                 filterDate ||
                 filterCompletionDate ||
+                completionStatusFilter !== "all" ||
                 scoreFilter !== "all" ||
                 filterBatches !== "all" ||
                 filterPrefix !== "all"
