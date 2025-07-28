@@ -51,7 +51,10 @@ const UserScoresTab: React.FC<UserScoresTabProps> = ({ annotatorDbId }) => {
       // entry we see for each exam_id to get the latest score.
       const latestScoresMap = new Map<number, any>();
       (completions || []).forEach((completion) => {
-        if (!latestScoresMap.has(completion.exam_id)) {
+        if (
+          completion.completed_at &&
+          !latestScoresMap.has(completion.exam_id)
+        ) {
           latestScoresMap.set(completion.exam_id, completion);
         }
       });

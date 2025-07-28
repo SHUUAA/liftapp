@@ -281,7 +281,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           .select(
             "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes, completed_at, exams(exam_code, name)"
           )
-          .in("status", ["submitted", "timed_out"]),
+          .in("status", ["submitted", "timed_out"])
+          .order("completed_at", { ascending: false }),
       ]);
 
       // De-structure and handle potential errors
@@ -302,16 +303,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         // Find the latest completion for each exam
         const latestCompletionsMap = new Map<number, any>();
         completionsForAnnotator.forEach((completion) => {
-          if (completion.completed_at) {
-            // Only consider completed exams
-            const existing = latestCompletionsMap.get(completion.exam_id);
-            if (
-              !existing ||
-              new Date(completion.completed_at) >
-                new Date(existing.completed_at)
-            ) {
-              latestCompletionsMap.set(completion.exam_id, completion);
-            }
+          // The data is now sorted by completed_at desc, so the first one we see for an exam is the latest.
+          // We also only consider completions that have a 'completed_at' timestamp.
+          if (
+            completion.completed_at &&
+            !latestCompletionsMap.has(completion.exam_id)
+          ) {
+            latestCompletionsMap.set(completion.exam_id, completion);
           }
         });
         const latestCompletions = Array.from(latestCompletionsMap.values());
