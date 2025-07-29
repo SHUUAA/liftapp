@@ -115,6 +115,8 @@ export const USER_ID_PREFIXES = [
   "PHBYUMG",
   "PHBYUNG",
   "PHBYUZA",
+  "PHJJ",
+  "PHNX",
   "PHLG",
   "PHCB",
   "PHCBIT",
