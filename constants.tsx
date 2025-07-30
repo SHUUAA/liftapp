@@ -76,7 +76,7 @@ const ArchiveBoxIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
   </svg>
 );
 
-export const EXAM_DURATION_SECONDS = 60 * 60; // 60 minutes
+export const EXAM_DURATION_SECONDS = 90 * 60; // 90 minutes
 
 export const EXAMS_DATA: Exam[] = [
   {
