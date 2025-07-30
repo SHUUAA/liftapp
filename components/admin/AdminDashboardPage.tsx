@@ -92,6 +92,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     direction: "ascending" | "descending";
   }>({ key: null, direction: "ascending" });
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [editingAnnotatorId, setEditingAnnotatorId] = useState<number | null>(
+    null
+  );
+  const [newUsername, setNewUsername] = useState<string>("");
 
   // Analytics Tab State
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
@@ -594,6 +598,83 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setShowAnswerKeyForm(true);
   };
 
+  const handleEditUsernameClick = (annotator: AnnotatorInfo) => {
+    setEditingAnnotatorId(annotator.id);
+    setNewUsername(annotator.liftapp_user_id);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingAnnotatorId(null);
+    setNewUsername("");
+  };
+
+  const handleSaveUsername = async (annotatorId: number) => {
+    const trimmedUsername = newUsername.trim();
+    if (!trimmedUsername) {
+      addToast({ type: "error", message: "Username cannot be empty." });
+      return;
+    }
+
+    const originalAnnotator = allAnnotators.find((a) => a.id === annotatorId);
+    if (originalAnnotator?.liftapp_user_id === trimmedUsername) {
+      handleCancelEdit(); // No change, just exit edit mode
+      return;
+    }
+
+    try {
+      // Check for duplicates before saving
+      const { data: existing, error: checkError } = await supabase
+        .from("annotators")
+        .select("id")
+        .eq("liftapp_user_id", trimmedUsername)
+        .neq("id", annotatorId) // Exclude the current user from the check
+        .limit(1)
+        .single();
+
+      if (checkError && checkError.code !== "PGRST116") {
+        throw checkError; // Handle actual errors
+      }
+
+      if (existing) {
+        addToast({
+          type: "error",
+          message: `Username "${trimmedUsername}" is already taken.`,
+        });
+        return;
+      }
+
+      // No duplicate found, proceed with update
+      const { error: updateError } = await supabase
+        .from("annotators")
+        .update({ liftapp_user_id: trimmedUsername })
+        .eq("id", annotatorId);
+
+      if (updateError) throw updateError;
+
+      // Update local state to reflect the change immediately
+      setAllAnnotators((prev) =>
+        prev.map((annotator) =>
+          annotator.id === annotatorId
+            ? { ...annotator, liftapp_user_id: trimmedUsername }
+            : annotator
+        )
+      );
+
+      addToast({
+        type: "success",
+        message: "Username updated successfully.",
+      });
+      handleCancelEdit(); // Exit edit mode
+    } catch (error: any) {
+      addToast({
+        type: "error",
+        message: `Failed to update username: ${
+          formatSupabaseError(error).message
+        }`,
+      });
+    }
+  };
+
   const filteredAnswerKeys = useMemo(() => {
     if (!activeAnswerKeyExamCode) return fetchedAnswerKeys;
     return fetchedAnswerKeys.filter(
@@ -911,6 +992,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             currentPage={currentPage}
             setCurrentPage={setCurrentPage}
             rowsPerPage={ROWS_PER_PAGE}
+            editingAnnotatorId={editingAnnotatorId}
+            newUsername={newUsername}
+            setNewUsername={setNewUsername}
+            onEditUsernameClick={handleEditUsernameClick}
+            onSaveUsername={handleSaveUsername}
+            onCancelEdit={handleCancelEdit}
           />
         );
       case "ANALYTICS":

@@ -29,7 +29,60 @@ interface AnnotatorsTabProps {
   currentPage: number;
   setCurrentPage: (page: number) => void;
   rowsPerPage: number;
+  editingAnnotatorId: number | null;
+  newUsername: string;
+  setNewUsername: (value: string) => void;
+  onEditUsernameClick: (annotator: AnnotatorInfo) => void;
+  onSaveUsername: (annotatorId: number) => void;
+  onCancelEdit: () => void;
 }
+
+const PencilIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="w-4 h-4"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
+    />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={2}
+    stroke="currentColor"
+    className="w-5 h-5"
+  >
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+  </svg>
+);
+
+const XIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={2}
+    stroke="currentColor"
+    className="w-5 h-5"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M6 18L18 6M6 6l12 12"
+    />
+  </svg>
+);
 
 const formatDurationForAdmin = (totalSeconds?: number): string => {
   if (totalSeconds === undefined || totalSeconds === null || totalSeconds < 0) {
@@ -205,6 +258,12 @@ const AnnotatorsTab: React.FC<AnnotatorsTabProps> = ({
   currentPage,
   setCurrentPage,
   rowsPerPage,
+  editingAnnotatorId,
+  newUsername,
+  setNewUsername,
+  onEditUsernameClick,
+  onSaveUsername,
+  onCancelEdit,
 }) => {
   const totalPages = Math.ceil(processedAnnotators.length / rowsPerPage);
 
@@ -595,8 +654,48 @@ const AnnotatorsTab: React.FC<AnnotatorsTabProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {paginatedAnnotators.map((annotator) => (
                   <tr key={annotator.id} className="bg-white hover:bg-slate-50">
-                    <td className="px-3 py-3 font-medium text-slate-900 sticky left-0 bg-white hover:bg-slate-50 z-10">
-                      {annotator.liftapp_user_id}
+                    <td className="px-3 py-2 font-medium text-slate-900 sticky left-0 bg-white hover:bg-slate-50 z-10">
+                      {editingAnnotatorId === annotator.id ? (
+                        <div className="flex items-center gap-x-1">
+                          <input
+                            type="text"
+                            value={newUsername}
+                            onChange={(e) => setNewUsername(e.target.value)}
+                            className="w-32 px-2 py-1 border border-blue-500 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter")
+                                onSaveUsername(annotator.id);
+                              if (e.key === "Escape") onCancelEdit();
+                            }}
+                          />
+                          <button
+                            onClick={() => onSaveUsername(annotator.id)}
+                            className="p-1.5 text-green-600 hover:bg-green-100 rounded-md"
+                            aria-label="Save username"
+                          >
+                            <CheckIcon />
+                          </button>
+                          <button
+                            onClick={onCancelEdit}
+                            className="p-1.5 text-red-600 hover:bg-red-100 rounded-md"
+                            aria-label="Cancel edit"
+                          >
+                            <XIcon />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-x-2">
+                          <button
+                            onClick={() => onEditUsernameClick(annotator)}
+                            className="p-1 text-slate-500 hover:text-blue-600 hover:bg-blue-100 rounded-md"
+                            aria-label="Edit username"
+                          >
+                            <PencilIcon />
+                          </button>
+                          <span>{annotator.liftapp_user_id}</span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       {new Date(annotator.created_at).toLocaleDateString()}
