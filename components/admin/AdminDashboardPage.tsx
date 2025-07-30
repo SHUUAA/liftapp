@@ -11,13 +11,14 @@ import {
   AdminProfile,
   AdminTab,
   FetchedAnswerKeySummary,
-  AnnotatorInfo,
   AnalyticsData,
-  UserExamScoreMetrics,
   AdminDashboardPageProps,
+  AnnotatorInfo,
+  UserExamScoreMetrics,
 } from "../../types";
 import { EXAMS_DATA, USER_ID_PREFIXES } from "../../constants";
 import AnswerKeyForm from "./AnswerKeyForm";
+import AnnotatorsTab from "./AnnotatorsTab";
 import { supabase } from "../../utils/supabase/client";
 import { useToast } from "../../contexts/ToastContext";
 import Modal from "../common/Modal";
@@ -27,90 +28,6 @@ import SubmissionsBarChart from "./charts/SubmissionsBarChart";
 
 const STORAGE_BUCKET_NAME = "exam-images";
 const ROWS_PER_PAGE = 50;
-
-const formatDurationForAdmin = (totalSeconds?: number): string => {
-  if (totalSeconds === undefined || totalSeconds === null || totalSeconds < 0) {
-    return "N/A";
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${seconds}s`;
-};
-
-// Helper function to convert array of objects to CSV string
-const convertToCSV = (
-  data: AnnotatorInfo[],
-  columnsToInclude: {
-    key: keyof AnnotatorInfo | string;
-    header: string;
-    isExamSpecific?: boolean;
-    examCode?: string;
-    metricKey?:
-      | keyof UserExamScoreMetrics
-      | "duration_seconds"
-      | "completed_at";
-  }[]
-) => {
-  if (!data || data.length === 0) {
-    return "";
-  }
-  const headers = columnsToInclude.map((col) => col.header).join(",");
-  const rows = data.map((row) => {
-    return columnsToInclude
-      .map((col) => {
-        let value: any;
-        if (col.isExamSpecific && col.examCode && col.metricKey) {
-          if (col.metricKey === "duration_seconds") {
-            value = row.per_exam_scores?.[col.examCode]?.duration_seconds;
-            if (typeof value === "number") {
-              // Format as "Xm Ys" for CSV readability, or keep as raw seconds
-              const minutes = Math.floor(value / 60);
-              const seconds = value % 60;
-              value = `${minutes}m ${seconds}s`;
-            } else {
-              value = "N/A";
-            }
-          } else {
-            value =
-              row.per_exam_scores?.[col.examCode]?.[
-                col.metricKey as keyof UserExamScoreMetrics
-              ];
-          }
-        } else {
-          value = row[col.key as keyof AnnotatorInfo];
-        }
-
-        if (value === null || value === undefined) {
-          value = "";
-        } else if (
-          col.key === "created_at" ||
-          col.key === "overall_completion_date" ||
-          (col.isExamSpecific && col.metricKey === "completed_at")
-        ) {
-          value = new Date(value).toLocaleDateString();
-        } else if (
-          typeof value === "number" &&
-          (col.key === "overall_score_percentage" ||
-            (col.metricKey === "score_percentage" && col.isExamSpecific))
-        ) {
-          value = `${value.toFixed(1)}%`;
-        } else {
-          value = String(value);
-        }
-
-        if (
-          value.includes(",") ||
-          value.includes('"') ||
-          value.includes("\n")
-        ) {
-          value = `"${value.replace(/"/g, '""')}"`;
-        }
-        return value;
-      })
-      .join(",");
-  });
-  return `${headers}\n${rows.join("\n")}`;
-};
 
 // Standalone TabButton component to prevent re-creation on every render
 interface TabButtonProps {
@@ -146,6 +63,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [activeTab, setActiveTab] = useState<AdminTab>("ANNOTATORS");
   const { addToast } = useToast();
 
+  // Answer Key Tab State
   const [fetchedAnswerKeys, setFetchedAnswerKeys] = useState<
     FetchedAnswerKeySummary[]
   >([]);
@@ -157,16 +75,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const [activeAnswerKeyExamCode, setActiveAnswerKeyExamCode] =
     useState<string>(EXAMS_DATA.length > 0 ? EXAMS_DATA[0].id : "");
 
+  // Annotators Tab State
   const [allAnnotators, setAllAnnotators] = useState<AnnotatorInfo[]>([]);
-  const [isLoadingAnnotators, setIsLoadingAnnotators] =
-    useState<boolean>(false);
+  const [isLoadingAnnotators, setIsLoadingAnnotators] = useState<boolean>(true);
   const [annotatorSearchTerm, setAnnotatorSearchTerm] = useState<string>("");
-
-  // New state for filters and sorting
   const [filterDate, setFilterDate] = useState<string>("");
-  const [filterCompletionDate, setFilterCompletionDate] = useState<string>("");
   const [completionStatusFilter, setCompletionStatusFilter] =
     useState<string>("all");
+  const [specificCompletionDate, setSpecificCompletionDate] =
+    useState<string>("");
   const [scoreFilter, setScoreFilter] = useState<string>("all");
   const [filterBatches, setFilterBatches] = useState<string>("all");
   const [filterPrefix, setFilterPrefix] = useState<string>("all");
@@ -174,18 +91,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     key: keyof AnnotatorInfo | null;
     direction: "ascending" | "descending";
   }>({ key: null, direction: "ascending" });
-
   const [currentPage, setCurrentPage] = useState<number>(1);
 
+  // Analytics Tab State
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
     null
   );
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState<boolean>(false);
 
+  // General Component State
   const [currentAdminProfile, setCurrentAdminProfile] =
     useState<AdminProfile | null>(null);
-
-  // State for Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalContent, setModalContent] = useState({
     title: "",
@@ -224,15 +140,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     try {
       const { data, error } = await supabase.rpc("get_answer_key_summaries");
 
-      if (error) {
-        console.error("Error fetching answer key summaries:", error);
-        addToast({
-          type: "error",
-          message: `Failed to load answer keys: ${error.message}`,
-        });
-        setFetchedAnswerKeys([]);
-        return;
-      }
+      if (error) throw formatSupabaseError(error);
 
       if (!data) {
         setFetchedAnswerKeys([]);
@@ -256,10 +164,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       });
       setFetchedAnswerKeys(summariesWithUrls || []);
     } catch (e: any) {
-      console.error("Exception fetching answer keys:", e);
       addToast({
         type: "error",
-        message: `An unexpected error occurred: ${e.message}`,
+        message: `Failed to load answer keys: ${e.message}`,
       });
       setFetchedAnswerKeys([]);
     } finally {
@@ -271,164 +178,104 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setIsLoadingAnnotators(true);
     dataFetchStatus.current.annotators = true;
     try {
-      // Fetch all necessary data in parallel for efficiency
-      const [annotatorsResponse, completionsResponse] = await Promise.all([
-        supabase
-          .from("annotators")
-          .select("id, liftapp_user_id, created_at, overall_completion_date"),
-        supabase
-          .from("user_exam_completions")
-          .select(
-            "annotator_id, exam_id, duration_seconds, retake_count, total_effective_keystrokes, total_answer_key_keystrokes, completed_at, exams(exam_code, name)"
-          )
-          .in("status", ["submitted", "timed_out"])
-          .order("completed_at", { ascending: false }),
-      ]);
-
-      // De-structure and handle potential errors
-      const { data: annotatorsData, error: annotatorsError } =
-        annotatorsResponse;
-      const { data: completionsData, error: completionsError } =
-        completionsResponse;
-
+      const { data: annotators, error: annotatorsError } = await supabase
+        .from("annotators")
+        .select("id, liftapp_user_id, created_at, overall_completion_date");
       if (annotatorsError) throw annotatorsError;
-      if (completionsError) throw completionsError;
-
-      // Process and aggregate the data on the client-side to ensure consistency
-      const annotatorsWithScores = (annotatorsData || []).map((annotator) => {
-        const completionsForAnnotator = (completionsData || []).filter(
-          (c) => c.annotator_id === annotator.id
-        );
-
-        // Find the latest completion for each exam
-        const latestCompletionsMap = new Map<number, any>();
-        completionsForAnnotator.forEach((completion) => {
-          // The data is now sorted by completed_at desc, so the first one we see for an exam is the latest.
-          // We also only consider completions that have a 'completed_at' timestamp.
-          if (
-            completion.completed_at &&
-            !latestCompletionsMap.has(completion.exam_id)
-          ) {
-            latestCompletionsMap.set(completion.exam_id, completion);
-          }
-        });
-        const latestCompletions = Array.from(latestCompletionsMap.values());
-
-        // Process scores for each individual exam based on the latest attempts
-        const per_exam_scores: Record<string, UserExamScoreMetrics> = {};
-        latestCompletions.forEach((comp) => {
-          const examCode = comp.exams?.exam_code;
-          if (examCode) {
-            const effective = comp.total_effective_keystrokes || 0;
-            const total = comp.total_answer_key_keystrokes || 0;
-            per_exam_scores[examCode] = {
-              images_attempted: 1, // 1 latest attempt
-              retakes: comp.retake_count || 0,
-              total_effective_user_keystrokes: effective,
-              total_answer_key_keystrokes: total,
-              duration_seconds: comp.duration_seconds ?? undefined,
-              score_percentage:
-                total > 0
-                  ? parseFloat(((effective / total) * 100).toFixed(1))
-                  : 0,
-              completed_at: comp.completed_at,
-            };
-          }
-        });
-
-        // Calculate overall statistics based on the LATEST completions
-        const total_effective_user_keystrokes_overall =
-          latestCompletions.reduce(
-            (sum, c) => sum + (c.total_effective_keystrokes || 0),
-            0
-          );
-        const total_answer_key_keystrokes_overall = latestCompletions.reduce(
-          (sum, c) => sum + (c.total_answer_key_keystrokes || 0),
-          0
-        );
-        const total_retakes_overall = latestCompletions.reduce(
-          (sum, c) => sum + (c.retake_count || 0),
-          0
-        );
-
-        // New overall percentage logic as requested
-        const totalScorePercentageSum = Object.values(per_exam_scores).reduce(
-          (sum, score) => sum + (score.score_percentage || 0),
-          0
-        );
-        const overall_score_percentage =
-          EXAMS_DATA.length > 0
-            ? parseFloat(
-                (totalScorePercentageSum / EXAMS_DATA.length).toFixed(1)
+      if (!annotators) {
+        setAllAnnotators([]);
+        return;
+      }
+      const { data: completions, error: completionsError } =
+        await (async () => {
+          let allRecords: any[] = [];
+          let page = 0;
+          const PAGE_SIZE = 1000;
+          while (true) {
+            const { data: pageData, error } = await supabase
+              .from("user_exam_completions")
+              .select(
+                `
+                annotator_id, exam_id, status, completed_at, retake_count, duration_seconds,
+                total_effective_keystrokes, total_answer_key_keystrokes, score_percentage,
+                exams ( exam_code, name )
+              `
               )
-            : 0;
-
-        // --- OVERALL COMPLETION DATE LOGIC ---
-        // If the user has passed all exams (score >= 90 for each exam),
-        // set the overall_completion_date to the latest completed_at among the 4 exams
-        let shouldSetOverallCompletionDate = false;
-        let latestCompletionDate: string | null = null;
-        if (EXAMS_DATA.length > 0) {
-          const passedAll = EXAMS_DATA.every((exam) => {
-            const score = per_exam_scores[exam.id]?.score_percentage;
-            return score !== undefined && score >= 90;
-          });
-          if (passedAll) {
-            // Find the latest completed_at among the 4 exams
-            const dates = EXAMS_DATA.map(
-              (exam) => per_exam_scores[exam.id]?.completed_at
-            )
-              .filter(Boolean)
-              .map((d) => new Date(d as string));
-            if (dates.length === EXAMS_DATA.length) {
-              latestCompletionDate = new Date(
-                Math.max(...dates.map((d) => d.getTime()))
-              ).toISOString();
-              shouldSetOverallCompletionDate = true;
-            }
+              .in("status", ["submitted", "timed_out"])
+              .order("completed_at", { ascending: false })
+              .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+            if (error) return { data: null, error };
+            if (pageData) allRecords.push(...pageData);
+            if (!pageData || pageData.length < PAGE_SIZE) break;
+            page++;
           }
+          return { data: allRecords, error: null };
+        })();
+      if (completionsError) throw completionsError;
+      const completionsByAnnotator = new Map<number, any[]>();
+      (completions || []).forEach((comp) => {
+        if (!completionsByAnnotator.has(comp.annotator_id)) {
+          completionsByAnnotator.set(comp.annotator_id, []);
         }
-
-        // If the DB value is missing and we should set it, update the DB
-        if (
-          !annotator.overall_completion_date &&
-          shouldSetOverallCompletionDate &&
-          latestCompletionDate
-        ) {
-          // Fire and forget, don't await
-          supabase
-            .from("annotators")
-            .update({ overall_completion_date: latestCompletionDate })
-            .eq("id", annotator.id)
-            .then(({ error }) => {
-              if (error) {
-                console.error(
-                  "Failed to update overall_completion_date for annotator",
-                  annotator.id,
-                  error
-                );
-              }
-            });
-        }
-
-        return {
-          id: annotator.id,
-          liftapp_user_id: annotator.liftapp_user_id,
-          created_at: annotator.created_at, // Keep as ISO string for filtering/sorting
-          overall_completion_date:
-            annotator.overall_completion_date || latestCompletionDate,
-          total_images_attempted_overall: latestCompletions.length, // Number of unique exams attempted
-          total_effective_user_keystrokes_overall,
-          total_answer_key_keystrokes_overall,
-          total_retakes_overall,
-          overall_score_percentage,
-          per_exam_scores,
-        };
+        completionsByAnnotator.get(comp.annotator_id)!.push(comp);
       });
-
-      setAllAnnotators(annotatorsWithScores);
+      const processedAnnotators: AnnotatorInfo[] = annotators.map(
+        (annotator) => {
+          const userCompletions =
+            completionsByAnnotator.get(annotator.id) || [];
+          const latestCompletionsMap = new Map<number, any>();
+          userCompletions.forEach((comp) => {
+            if (comp.completed_at && !latestCompletionsMap.has(comp.exam_id)) {
+              latestCompletionsMap.set(comp.exam_id, comp);
+            }
+          });
+          const latestCompletions = Array.from(latestCompletionsMap.values());
+          let total_images_attempted_overall = 0;
+          let total_effective_user_keystrokes_overall = 0;
+          let total_answer_key_keystrokes_overall = 0;
+          let total_retakes_overall = 0;
+          const per_exam_scores: Record<string, UserExamScoreMetrics> = {};
+          latestCompletions.forEach((comp) => {
+            total_images_attempted_overall += 1;
+            const effectiveKs = comp.total_effective_keystrokes || 0;
+            const totalKs = comp.total_answer_key_keystrokes || 0;
+            total_effective_user_keystrokes_overall += effectiveKs;
+            total_answer_key_keystrokes_overall += totalKs;
+            total_retakes_overall += comp.retake_count || 0;
+            if (comp.exams?.exam_code) {
+              per_exam_scores[comp.exams.exam_code] = {
+                images_attempted: 1,
+                retakes: comp.retake_count || 0,
+                total_effective_user_keystrokes: effectiveKs,
+                total_answer_key_keystrokes: totalKs,
+                score_percentage: comp.score_percentage,
+                duration_seconds: comp.duration_seconds,
+                completed_at: comp.completed_at,
+              };
+            }
+          });
+          const overall_score_percentage =
+            total_answer_key_keystrokes_overall > 0
+              ? (total_effective_user_keystrokes_overall /
+                  total_answer_key_keystrokes_overall) *
+                100
+              : 0;
+          return {
+            id: annotator.id,
+            liftapp_user_id: annotator.liftapp_user_id,
+            created_at: annotator.created_at,
+            overall_completion_date: annotator.overall_completion_date,
+            total_images_attempted_overall,
+            total_effective_user_keystrokes_overall,
+            total_answer_key_keystrokes_overall,
+            overall_score_percentage,
+            total_retakes_overall,
+            per_exam_scores,
+          };
+        }
+      );
+      setAllAnnotators(processedAnnotators);
     } catch (e: any) {
-      console.error("Exception fetching annotators:", e);
       const formattedError = formatSupabaseError(e);
       addToast({
         type: "error",
@@ -479,17 +326,16 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       ].filter(Boolean);
 
       if (errors.length > 0) {
-        const errorMsg =
-          "One or more analytics queries failed. Check console for details.";
-        console.error("Analytics Errors:", errors);
-        throw new Error(errorMsg);
+        throw new Error(
+          "One or more analytics queries failed: " +
+            errors.map((e) => e.message).join(", ")
+        );
       }
 
-      // Process registration data for the line chart
       const dailyCounts = new Map<string, number>();
       (annotatorsRegistrationData || []).forEach((record) => {
         if (record.created_at) {
-          const date = new Date(record.created_at).toISOString().split("T")[0]; // Get 'YYYY-MM-DD'
+          const date = new Date(record.created_at).toISOString().split("T")[0];
           dailyCounts.set(date, (dailyCounts.get(date) || 0) + 1);
         }
       });
@@ -512,7 +358,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         annotatorRegistrations: annotatorRegistrations,
       });
     } catch (e: any) {
-      console.error("Exception fetching analytics:", e);
       addToast({
         type: "error",
         message: `Failed to load analytics: ${e.message}`,
@@ -523,8 +368,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   }, [addToast]);
 
   useEffect(() => {
-    // This effect ensures data is loaded once when a tab is first opened.
-    // Subsequent data refreshes must be triggered manually via the "Refresh" buttons.
     if (
       activeTab === "ANSWER_KEYS" &&
       !showAnswerKeyForm &&
@@ -562,14 +405,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       .eq("exam_code", examCode)
       .single();
     if (error && error.code !== "PGRST116") {
-      console.error(`Error fetching exam DB ID for '${examCode}':`, error);
       addToast({
         type: "error",
         message: `Error fetching configuration for exam '${examCode}'.`,
       });
       return null;
     }
-    if (data && exam) exam.dbId = data.id; // Cache it on the EXAMS_DATA constant
+    if (data && exam) exam.dbId = data.id;
     return data ? data.id : null;
   };
 
@@ -585,32 +427,22 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       setIsLoadingAnswerKeys(true);
       try {
         let imageDbId = keyData.dbImageId;
-        let imageUrl = keyData.imageUrl;
         let storagePath = keyData.imageId;
 
         const examDbId =
           keyData.dbExamId || (await getExamDatabaseId(keyData.examId));
-        if (!examDbId) {
+        if (!examDbId)
           throw new Error(
-            `Could not find database ID for exam code: ${keyData.examId}`
+            `Could not find DB ID for exam code: ${keyData.examId}`
           );
-        }
 
         if (keyData.imageFile) {
           const file = keyData.imageFile;
           storagePath = `${keyData.examId}/${file.name}_${Date.now()}`;
-
           const { error: uploadError } = await supabase.storage
             .from(STORAGE_BUCKET_NAME)
-            .upload(storagePath, file, { cacheControl: "3600", upsert: false });
-
-          if (uploadError)
-            throw new Error(`Failed to upload image: ${uploadError.message}`);
-
-          const { data: urlData } = supabase.storage
-            .from(STORAGE_BUCKET_NAME)
-            .getPublicUrl(storagePath);
-          imageUrl = urlData.publicUrl;
+            .upload(storagePath, file, { upsert: false });
+          if (uploadError) throw uploadError;
         }
 
         if (storagePath && (!imageDbId || keyData.imageFile)) {
@@ -620,9 +452,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             original_filename: keyData.imageFile?.name || keyData.imageId,
             uploader_profile_id: currentAdminProfile.id,
           };
-
           if (imageDbId && keyData.imageFile) {
-            // If existing image is being replaced
             const { data, error: updateImageError } = await supabase
               .from("images")
               .update(imageRecord)
@@ -632,7 +462,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             if (updateImageError) throw updateImageError;
             imageDbId = data?.id;
           } else if (!imageDbId) {
-            // New image
             const { data, error: insertImageError } = await supabase
               .from("images")
               .insert([imageRecord])
@@ -642,22 +471,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             imageDbId = data?.id;
           }
         }
-
-        if (!imageDbId)
-          throw new Error(
-            "Failed to get or create a database ID for the image."
-          );
-
+        if (!imageDbId) throw new Error("Failed to get DB ID for image.");
         const { error: deleteError } = await supabase
           .from("answer_key_rows")
           .delete()
           .eq("image_id", imageDbId);
-        if (deleteError) {
-          console.warn(
-            "Failed to delete old answer rows during update, attempting to insert new ones anyway:",
-            deleteError.message
-          );
-        }
+        if (deleteError)
+          console.warn("Could not clear old answers:", deleteError.message);
 
         const answerRowsToInsert = keyData.answers.map((answerRow) => ({
           image_id: imageDbId!,
@@ -665,14 +485,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           row_data: answerRow.cells,
           client_row_id: answerRow.id,
         }));
-
         if (answerRowsToInsert.length > 0) {
           const { error: insertAnswersError } = await supabase
             .from("answer_key_rows")
             .insert(answerRowsToInsert);
           if (insertAnswersError) throw insertAnswersError;
         }
-
         addToast({
           type: "success",
           message: "Answer key saved successfully!",
@@ -681,11 +499,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         setEditingAnswerKey(null);
         fetchAnswerKeySummaries();
       } catch (error: any) {
-        console.error("Failed to save answer key:", error);
         addToast({
           type: "error",
           message: `Error saving answer key: ${
-            error.message || "Unknown error"
+            formatSupabaseError(error).message
           }`,
         });
       } finally {
@@ -703,16 +520,13 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         .select("id, row_data, client_row_id")
         .eq("image_id", summary.dbImageId)
         .order("id", { ascending: true });
-
       if (error) throw error;
-
       const answers: AnswerKeyEntry["answers"] = (answerRowsData || []).map(
         (dbRow: any) => ({
           id: dbRow.client_row_id || `db_id_${dbRow.id}`,
           cells: dbRow.row_data,
         })
       );
-
       setEditingAnswerKey({
         examId: summary.examCode,
         imageId: summary.originalFilename || summary.storagePath,
@@ -723,10 +537,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       });
       setShowAnswerKeyForm(true);
     } catch (e: any) {
-      console.error("Error fetching full answer key for editing:", e);
       addToast({
         type: "error",
-        message: `Could not load answer key for editing: ${e.message}`,
+        message: `Could not load answer key for editing: ${
+          formatSupabaseError(e).message
+        }`,
       });
     } finally {
       setIsLoadingAnswerKeys(false);
@@ -738,9 +553,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       title: "Confirm Deletion",
       body: (
         <p>
-          Are you sure you want to delete this answer key? This will remove all
-          answer rows associated with this image. The image itself will NOT be
-          deleted from storage.
+          Are you sure you want to delete this answer key? This action is
+          irreversible.
         </p>
       ),
       onConfirm: () => handleDeleteAnswerKey(dbImageId),
@@ -758,17 +572,17 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         .delete()
         .eq("image_id", dbImageId);
       if (deleteRowsError) throw deleteRowsError;
-
       addToast({
         type: "success",
-        message: "Answer key (rows) deleted successfully.",
+        message: "Answer key deleted successfully.",
       });
-      fetchAnswerKeySummaries(); // Refresh the list
+      fetchAnswerKeySummaries();
     } catch (e: any) {
-      console.error("Error deleting answer key:", e);
       addToast({
         type: "error",
-        message: `Failed to delete answer key: ${e.message}`,
+        message: `Failed to delete answer key: ${
+          formatSupabaseError(e).message
+        }`,
       });
     } finally {
       setIsLoadingAnswerKeys(false);
@@ -780,10 +594,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setShowAnswerKeyForm(true);
   };
 
+  const filteredAnswerKeys = useMemo(() => {
+    if (!activeAnswerKeyExamCode) return fetchedAnswerKeys;
+    return fetchedAnswerKeys.filter(
+      (key) => key.examCode === activeAnswerKeyExamCode
+    );
+  }, [fetchedAnswerKeys, activeAnswerKeyExamCode]);
+
   const processedAnnotators = useMemo(() => {
     let processableItems = [...allAnnotators];
-
-    // Apply search filter
     if (annotatorSearchTerm) {
       processableItems = processableItems.filter((annotator) =>
         annotator.liftapp_user_id
@@ -791,51 +610,39 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           .includes(annotatorSearchTerm.toLowerCase())
       );
     }
-
-    // Apply prefix filter
     if (filterPrefix !== "all") {
       processableItems = processableItems.filter((annotator) =>
         annotator.liftapp_user_id.startsWith(filterPrefix)
       );
     }
-
-    // Apply registration date filter
     if (filterDate) {
       processableItems = processableItems.filter((annotator) => {
         if (!annotator.created_at) return false;
-        // Get YYYY-MM-DD from the ISO string
-        const registrationDate = new Date(annotator.created_at)
-          .toISOString()
-          .split("T")[0];
-        return registrationDate === filterDate;
+        return (
+          new Date(annotator.created_at).toISOString().split("T")[0] ===
+          filterDate
+        );
       });
     }
-
-    // Apply completion date filter
-    if (filterCompletionDate) {
+    if (completionStatusFilter === "completed") {
+      processableItems = processableItems.filter(
+        (annotator) => !!annotator.overall_completion_date
+      );
+    } else if (completionStatusFilter === "not_completed") {
+      processableItems = processableItems.filter(
+        (annotator) => !annotator.overall_completion_date
+      );
+    }
+    if (specificCompletionDate) {
       processableItems = processableItems.filter((annotator) => {
         if (!annotator.overall_completion_date) return false;
-        const completionDate = new Date(annotator.overall_completion_date)
-          .toISOString()
-          .split("T")[0];
-        return completionDate === filterCompletionDate;
+        return (
+          new Date(annotator.overall_completion_date)
+            .toISOString()
+            .split("T")[0] === specificCompletionDate
+        );
       });
     }
-
-    // Apply completion status filter
-    if (completionStatusFilter !== "all") {
-      processableItems = processableItems.filter((annotator) => {
-        if (completionStatusFilter === "completed") {
-          return !!annotator.overall_completion_date;
-        }
-        if (completionStatusFilter === "not_completed") {
-          return !annotator.overall_completion_date;
-        }
-        return true;
-      });
-    }
-
-    // Apply score filter
     if (scoreFilter !== "all") {
       processableItems = processableItems.filter((annotator) => {
         const score = annotator.overall_score_percentage;
@@ -845,8 +652,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         return true;
       });
     }
-
-    // Apply batches filter
     if (filterBatches !== "all") {
       const numBatches = parseInt(filterBatches, 10);
       processableItems = processableItems.filter(
@@ -854,8 +659,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           (annotator.total_images_attempted_overall ?? 0) === numBatches
       );
     }
-
-    // Apply sorting
     if (sortConfig.key) {
       const { key, direction } = sortConfig;
       processableItems.sort((a, b) => {
@@ -865,37 +668,28 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         let bValue =
           b[key as keyof AnnotatorInfo] ??
           (key === "overall_completion_date" ? null : 0);
-
-        // Handle date sorting properly
         if (key === "overall_completion_date") {
-          if (aValue === null) return 1; // Nulls last
+          if (aValue === null) return 1;
           if (bValue === null) return -1;
         }
-
-        if (aValue < bValue) {
-          return direction === "ascending" ? -1 : 1;
-        }
-        if (aValue > bValue) {
-          return direction === "ascending" ? 1 : -1;
-        }
+        if (aValue < bValue) return direction === "ascending" ? -1 : 1;
+        if (aValue > bValue) return direction === "ascending" ? 1 : -1;
         return 0;
       });
     }
-
     return processableItems;
   }, [
     allAnnotators,
     annotatorSearchTerm,
     filterDate,
-    filterCompletionDate,
     completionStatusFilter,
+    specificCompletionDate,
     scoreFilter,
     filterBatches,
     filterPrefix,
     sortConfig,
   ]);
 
-  const totalPages = Math.ceil(processedAnnotators.length / ROWS_PER_PAGE);
   const paginatedAnnotators = useMemo(() => {
     const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
     return processedAnnotators.slice(startIndex, startIndex + ROWS_PER_PAGE);
@@ -906,8 +700,8 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   }, [
     annotatorSearchTerm,
     filterDate,
-    filterCompletionDate,
     completionStatusFilter,
+    specificCompletionDate,
     scoreFilter,
     filterBatches,
     filterPrefix,
@@ -919,161 +713,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       direction = "descending";
     }
     setSortConfig({ key, direction });
-  };
-
-  const handleExportAnnotatorsToCSV = () => {
-    const columnsToExport: {
-      key: keyof AnnotatorInfo | string;
-      header: string;
-      isExamSpecific?: boolean;
-      examCode?: string;
-      metricKey?:
-        | keyof UserExamScoreMetrics
-        | "duration_seconds"
-        | "completed_at";
-    }[] = [
-      { key: "id", header: "DB ID" },
-      { key: "liftapp_user_id", header: "LiftApp User ID" },
-      { key: "created_at", header: "Registered On" },
-      { key: "overall_completion_date", header: "Overall Completion Date" },
-      { key: "total_images_attempted_overall", header: "Overall Batches" },
-      {
-        key: "total_effective_user_keystrokes_overall",
-        header: "Overall Effective Keystrokes",
-      },
-      {
-        key: "total_answer_key_keystrokes_overall",
-        header: "Overall Total Keystrokes",
-      },
-      { key: "total_retakes_overall", header: "Overall Retakes" },
-      { key: "overall_score_percentage", header: "Overall Score (%)" },
-    ];
-
-    EXAMS_DATA.forEach((exam) => {
-      columnsToExport.push({
-        key: `${exam.id}_images_attempted`,
-        header: `${exam.name} Batches`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "images_attempted",
-      });
-      columnsToExport.push({
-        key: `${exam.id}_retakes`,
-        header: `${exam.name} Retakes`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "retakes",
-      });
-      columnsToExport.push({
-        key: `${exam.id}_effective_keystrokes`,
-        header: `${exam.name} Effective Keystrokes`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "total_effective_user_keystrokes",
-      });
-      columnsToExport.push({
-        key: `${exam.id}_total_keystrokes`,
-        header: `${exam.name} Total Keystrokes`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "total_answer_key_keystrokes",
-      });
-      columnsToExport.push({
-        key: `${exam.id}_duration_seconds`,
-        header: `${exam.name} Duration`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "duration_seconds",
-      });
-      columnsToExport.push({
-        key: `${exam.id}_score_percentage`,
-        header: `${exam.name} Score (%)`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "score_percentage",
-      });
-      columnsToExport.push({
-        key: `${exam.id}_completed_at`,
-        header: `${exam.name} Date Completed`,
-        isExamSpecific: true,
-        examCode: exam.id,
-        metricKey: "completed_at",
-      });
-    });
-
-    const csvData = convertToCSV(processedAnnotators, columnsToExport);
-    const blob = new Blob([csvData], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    if (link.download !== undefined) {
-      const url = URL.createObjectURL(blob);
-      link.setAttribute("href", url);
-      link.setAttribute("download", "annotators_detailed_scores.csv");
-      link.style.visibility = "hidden";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-  };
-
-  const filteredAnswerKeys = useMemo(() => {
-    if (!activeAnswerKeyExamCode) return fetchedAnswerKeys;
-    return fetchedAnswerKeys.filter(
-      (key) => key.examCode === activeAnswerKeyExamCode
-    );
-  }, [fetchedAnswerKeys, activeAnswerKeyExamCode]);
-
-  const SortIcon: React.FC<{
-    direction: "ascending" | "descending" | null;
-  }> = ({ direction }) => {
-    if (!direction) {
-      return (
-        <svg
-          className="w-3 h-3 text-slate-400 inline-block"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            d="M8 9l4-4 4 4m0 6l-4 4-4-4"
-          />
-        </svg>
-      );
-    }
-    if (direction === "ascending") {
-      return (
-        <svg
-          className="w-3 h-3 text-blue-500 inline-block"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            d="M5 15l7-7 7 7"
-          />
-        </svg>
-      );
-    }
-    return (
-      <svg
-        className="w-3 h-3 text-blue-500 inline-block"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          d="M19 9l-7 7-7-7"
-        />
-      </svg>
-    );
   };
 
   const RefreshIcon = ({ spinning }: { spinning: boolean }) => (
@@ -1092,13 +731,6 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       />
     </svg>
   );
-
-  const getSortIcon = (key: keyof AnnotatorInfo) => {
-    if (sortConfig.key !== key) {
-      return <SortIcon direction={null} />;
-    }
-    return <SortIcon direction={sortConfig.direction} />;
-  };
 
   const renderActiveTabContent = () => {
     switch (activeTab) {
@@ -1167,10 +799,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 <div>
                   {isLoadingAnswerKeys && (
                     <p className="text-slate-500 italic">
-                      Loading answer keys for{" "}
-                      {EXAMS_DATA.find((e) => e.id === activeAnswerKeyExamCode)
-                        ?.name || "selected exam"}
-                      ...
+                      Loading answer keys...
                     </p>
                   )}
                   {!isLoadingAnswerKeys && filteredAnswerKeys.length === 0 && (
@@ -1258,463 +887,31 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         );
       case "ANNOTATORS":
         return (
-          <div className="p-6 bg-slate-50 rounded-lg shadow">
-            <div className="flex flex-wrap gap-y-4 justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold text-slate-700">
-                Annotator Management & Scores
-              </h3>
-              <div className="flex items-center gap-x-3">
-                <button
-                  onClick={fetchAnnotators}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-x-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-wait"
-                  disabled={isLoadingAnnotators}
-                >
-                  <RefreshIcon spinning={isLoadingAnnotators} />
-                  Refresh
-                </button>
-                <button
-                  onClick={handleExportAnnotatorsToCSV}
-                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                  disabled={
-                    isLoadingAnnotators || processedAnnotators.length === 0
-                  }
-                >
-                  Export to CSV
-                </button>
-              </div>
-            </div>
-
-            {/* Filter and Sort Controls */}
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-2 mb-4 p-4 bg-slate-100 rounded-md border border-slate-200">
-              <div>
-                <label
-                  htmlFor="annotatorSearch"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  Search User ID
-                </label>
-                <input
-                  id="annotatorSearch"
-                  type="text"
-                  placeholder="Search..."
-                  value={annotatorSearchTerm}
-                  onChange={(e) => setAnnotatorSearchTerm(e.target.value)}
-                  className="mt-1 block w-full md:w-40 px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="prefixFilter"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  User Prefix
-                </label>
-                <select
-                  id="prefixFilter"
-                  value={filterPrefix}
-                  onChange={(e) => setFilterPrefix(e.target.value)}
-                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                >
-                  <option value="all">All Prefixes</option>
-                  {USER_ID_PREFIXES.map((prefix) => (
-                    <option key={prefix} value={prefix}>
-                      {prefix}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="registeredOnDate"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  Registered On
-                </label>
-                <div className="flex items-center mt-1">
-                  <input
-                    id="registeredOnDate"
-                    type="date"
-                    value={filterDate}
-                    onChange={(e) => setFilterDate(e.target.value)}
-                    className="block w-full px-3 py-2 border border-slate-300 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  />
-                  <button
-                    onClick={() => setFilterDate("")}
-                    aria-label="Clear date filter"
-                    className="px-3 py-2 bg-slate-200 border border-l-0 border-slate-300 rounded-r-md text-slate-600 hover:bg-slate-300"
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label
-                  htmlFor="completionDate"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  Completed On
-                </label>
-                <div className="flex items-center mt-1">
-                  <input
-                    id="completionDate"
-                    type="date"
-                    value={filterCompletionDate}
-                    onChange={(e) => setFilterCompletionDate(e.target.value)}
-                    className="block w-full px-3 py-2 border border-slate-300 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  />
-                  <button
-                    onClick={() => setFilterCompletionDate("")}
-                    aria-label="Clear completion date filter"
-                    className="px-3 py-2 bg-slate-200 border border-l-0 border-slate-300 rounded-r-md text-slate-600 hover:bg-slate-300"
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label
-                  htmlFor="completionStatusFilter"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  Completion Status
-                </label>
-                <select
-                  id="completionStatusFilter"
-                  value={completionStatusFilter}
-                  onChange={(e) => setCompletionStatusFilter(e.target.value)}
-                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="completed">With Completion Date</option>
-                  <option value="not_completed">No Completion Date</option>
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="scoreFilter"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  Overall Score
-                </label>
-                <select
-                  id="scoreFilter"
-                  value={scoreFilter}
-                  onChange={(e) => setScoreFilter(e.target.value)}
-                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                >
-                  <option value="all">All Scores</option>
-                  <option value=">=90">Passed (&gt;= 90%)</option>
-                  <option value="<90">Failed (&lt; 90%)</option>
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="batchesFilter"
-                  className="block text-xs font-medium text-slate-600"
-                >
-                  Overall Batches
-                </label>
-                <select
-                  id="batchesFilter"
-                  value={filterBatches}
-                  onChange={(e) => setFilterBatches(e.target.value)}
-                  className="mt-1 block w-full pl-3 pr-8 py-2 border-slate-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                >
-                  <option value="all">All Batches</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                </select>
-              </div>
-            </div>
-
-            {isLoadingAnnotators && (
-              <p className="text-slate-500 italic">Loading annotators...</p>
-            )}
-            {!isLoadingAnnotators && processedAnnotators.length === 0 && (
-              <p className="text-slate-500 italic text-center py-8">
-                No annotators found
-                {annotatorSearchTerm ||
-                filterDate ||
-                filterCompletionDate ||
-                completionStatusFilter !== "all" ||
-                scoreFilter !== "all" ||
-                filterBatches !== "all" ||
-                filterPrefix !== "all"
-                  ? " matching your criteria"
-                  : ""}
-                .
-              </p>
-            )}
-            {!isLoadingAnnotators && processedAnnotators.length > 0 && (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs text-left text-slate-600 whitespace-nowrap">
-                    <thead className="text-xs text-slate-700 uppercase bg-slate-200">
-                      <tr>
-                        <th
-                          scope="col"
-                          className="px-3 py-3 sticky left-0 bg-slate-200 z-10"
-                        >
-                          LiftApp User ID
-                        </th>
-                        <th scope="col" className="px-3 py-3">
-                          Registered On
-                        </th>
-                        <th scope="col" className="px-3 py-3">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              requestSort("overall_completion_date")
-                            }
-                            className="flex items-center justify-center w-full gap-1 font-semibold text-slate-700 uppercase"
-                          >
-                            Overall Completion Date{" "}
-                            {getSortIcon("overall_completion_date")}
-                          </button>
-                        </th>
-                        <th scope="col" className="px-3 py-3 text-center">
-                          Overall Batches
-                        </th>
-                        <th scope="col" className="px-3 py-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => requestSort("total_retakes_overall")}
-                            className="flex items-center justify-center w-full gap-1 font-semibold text-slate-700 uppercase"
-                          >
-                            Overall Retakes{" "}
-                            {getSortIcon("total_retakes_overall")}
-                          </button>
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-3 py-3 text-center"
-                          title="Overall Effective Keystrokes"
-                        >
-                          Overall Effective Keystrokes
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-3 py-3 text-center"
-                          title="Overall Total Keystrokes"
-                        >
-                          Overall Total Keystrokes
-                        </th>
-                        <th scope="col" className="px-3 py-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              requestSort("overall_score_percentage")
-                            }
-                            className="flex items-center justify-center w-full gap-1 font-semibold text-slate-700 uppercase"
-                          >
-                            Overall Score (%){" "}
-                            {getSortIcon("overall_score_percentage")}
-                          </button>
-                        </th>
-                        {EXAMS_DATA.map((exam) => (
-                          <React.Fragment key={exam.id}>
-                            <th
-                              scope="col"
-                              className="px-3 py-3 text-center border-l border-slate-300"
-                            >
-                              {exam.name} Batches
-                            </th>
-                            <th scope="col" className="px-3 py-3 text-center">
-                              {exam.name} Retakes
-                            </th>
-                            <th
-                              scope="col"
-                              className="px-3 py-3 text-center"
-                              title="Effective Keystrokes"
-                            >
-                              {exam.name} Effective Keystrokes
-                            </th>
-                            <th
-                              scope="col"
-                              className="px-3 py-3 text-center"
-                              title="Total Keystrokes"
-                            >
-                              {exam.name} Total Keystrokes
-                            </th>
-                            <th scope="col" className="px-3 py-3 text-center">
-                              {exam.name} Duration
-                            </th>
-                            <th scope="col" className="px-3 py-3 text-center">
-                              {exam.name} Score (%)
-                            </th>
-                            <th scope="col" className="px-3 py-3 text-center">
-                              {exam.name} Date Completed
-                            </th>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {paginatedAnnotators.map((annotator) => (
-                        <tr
-                          key={annotator.id}
-                          className="bg-white hover:bg-slate-50"
-                        >
-                          <td className="px-3 py-3 font-medium text-slate-900 sticky left-0 bg-white hover:bg-slate-50 z-10">
-                            {annotator.liftapp_user_id}
-                          </td>
-                          <td className="px-3 py-3">
-                            {new Date(
-                              annotator.created_at
-                            ).toLocaleDateString()}
-                          </td>
-                          <td className="px-3 py-3 font-semibold text-indigo-600">
-                            {annotator.overall_completion_date ? (
-                              new Date(
-                                annotator.overall_completion_date
-                              ).toLocaleDateString()
-                            ) : (
-                              <span className="text-slate-400 italic">N/A</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            {annotator.total_images_attempted_overall ?? "N/A"}
-                          </td>
-                          <td className="px-3 py-3 text-center font-semibold">
-                            {annotator.total_retakes_overall ?? 0}
-                          </td>
-                          <td className="px-3 py-3 text-center text-green-600 font-semibold">
-                            {annotator.total_effective_user_keystrokes_overall ??
-                              "N/A"}
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            {annotator.total_answer_key_keystrokes_overall ??
-                              "N/A"}
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            {annotator.overall_score_percentage !== undefined &&
-                            annotator.overall_score_percentage !== null ? (
-                              <span
-                                className={`font-bold px-2 py-1 rounded-full text-xs ${
-                                  annotator.overall_score_percentage >= 90
-                                    ? "bg-green-100 text-green-700"
-                                    : annotator.overall_score_percentage >= 50
-                                    ? "bg-yellow-100 text-yellow-700"
-                                    : "bg-red-100 text-red-700"
-                                }`}
-                              >
-                                {annotator.overall_score_percentage.toFixed(1)}%
-                              </span>
-                            ) : (
-                              <span className="text-slate-500 italic text-xs">
-                                N/A
-                              </span>
-                            )}
-                          </td>
-                          {EXAMS_DATA.map((exam) => {
-                            const examScores =
-                              annotator.per_exam_scores?.[exam.id];
-                            return (
-                              <React.Fragment key={exam.id}>
-                                <td className="px-3 py-3 text-center border-l border-slate-300">
-                                  {examScores?.images_attempted ?? 0}
-                                </td>
-                                <td className="px-3 py-3 text-center font-semibold">
-                                  {examScores?.retakes ?? 0}
-                                </td>
-                                <td className="px-3 py-3 text-center text-green-600 font-semibold">
-                                  {examScores?.total_effective_user_keystrokes ??
-                                    0}
-                                </td>
-                                <td className="px-3 py-3 text-center">
-                                  {examScores?.total_answer_key_keystrokes ?? 0}
-                                </td>
-                                <td className="px-3 py-3 text-center">
-                                  {formatDurationForAdmin(
-                                    examScores?.duration_seconds
-                                  )}
-                                </td>
-                                <td className="px-3 py-3 text-center">
-                                  {examScores?.score_percentage !== undefined &&
-                                  examScores?.score_percentage !== null &&
-                                  (examScores.total_answer_key_keystrokes ??
-                                    0) > 0 ? (
-                                    <span
-                                      className={`font-bold px-2 py-1 rounded-full text-xs ${
-                                        examScores.score_percentage >= 90
-                                          ? "bg-green-100 text-green-700"
-                                          : examScores.score_percentage >= 50
-                                          ? "bg-yellow-100 text-yellow-700"
-                                          : "bg-red-100 text-red-700"
-                                      }`}
-                                    >
-                                      {examScores.score_percentage.toFixed(1)}%
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-500 italic text-xs">
-                                      N/A
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-3 py-3 text-center">
-                                  {examScores?.completed_at ? (
-                                    new Date(
-                                      examScores.completed_at
-                                    ).toLocaleDateString()
-                                  ) : (
-                                    <span className="text-slate-500 italic text-xs">
-                                      N/A
-                                    </span>
-                                  )}
-                                </td>
-                              </React.Fragment>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="flex items-center justify-between mt-4 px-2 py-1">
-                  <span className="text-sm text-slate-600">
-                    Showing{" "}
-                    <b>
-                      {Math.min(
-                        (currentPage - 1) * ROWS_PER_PAGE + 1,
-                        processedAnnotators.length
-                      )}
-                    </b>{" "}
-                    to{" "}
-                    <b>
-                      {Math.min(
-                        currentPage * ROWS_PER_PAGE,
-                        processedAnnotators.length
-                      )}
-                    </b>{" "}
-                    of <b>{processedAnnotators.length}</b> results
-                  </span>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                      className="px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Previous
-                    </button>
-                    <span className="text-sm text-slate-700 font-medium">
-                      Page {currentPage} of {totalPages}
-                    </span>
-                    <button
-                      onClick={() =>
-                        setCurrentPage((p) => Math.min(totalPages, p + 1))
-                      }
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      className="px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          <AnnotatorsTab
+            isLoading={isLoadingAnnotators}
+            paginatedAnnotators={paginatedAnnotators}
+            processedAnnotators={processedAnnotators}
+            sortConfig={sortConfig}
+            requestSort={requestSort}
+            onRefresh={fetchAnnotators}
+            annotatorSearchTerm={annotatorSearchTerm}
+            setAnnotatorSearchTerm={setAnnotatorSearchTerm}
+            filterPrefix={filterPrefix}
+            setFilterPrefix={setFilterPrefix}
+            filterDate={filterDate}
+            setFilterDate={setFilterDate}
+            completionStatusFilter={completionStatusFilter}
+            setCompletionStatusFilter={setCompletionStatusFilter}
+            specificCompletionDate={specificCompletionDate}
+            setSpecificCompletionDate={setSpecificCompletionDate}
+            scoreFilter={scoreFilter}
+            setScoreFilter={setScoreFilter}
+            filterBatches={filterBatches}
+            setFilterBatches={setFilterBatches}
+            currentPage={currentPage}
+            setCurrentPage={setCurrentPage}
+            rowsPerPage={ROWS_PER_PAGE}
+          />
         );
       case "ANALYTICS":
         return (

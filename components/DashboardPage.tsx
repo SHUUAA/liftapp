@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { EXAMS_DATA } from "../constants";
 import ExamCard from "./ExamCard";
@@ -114,10 +115,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         // Process data to only show the LATEST score for each exam type
         const latestStatusMap = new Map<number, any>();
         (completions || []).forEach((completion) => {
-          if (
-            completion.completed_at &&
-            !latestStatusMap.has(completion.exam_id)
-          ) {
+          if (completion.completed_at && !latestStatusMap.has(completion.exam_id)) {
             latestStatusMap.set(completion.exam_id, completion);
           }
         });

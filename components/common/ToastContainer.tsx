@@ -11,7 +11,7 @@ const ToastContainer: React.FC = () => {
       aria-live="assertive"
       className="fixed inset-0 flex flex-col items-end justify-start px-4 py-6 pointer-events-none sm:p-6 sm:justify-start z-[100]"
     >
-      <div className="w-full max-w-sm space-y-3">
+      <div className="w-full max-w-sm space-y-3 pointer-events-auto">
         {toasts.map(toast => (
           <Toast key={toast.id} toast={toast} onDismiss={removeToast} />
         ))}
