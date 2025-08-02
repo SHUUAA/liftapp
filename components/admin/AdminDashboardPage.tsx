@@ -264,11 +264,68 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                   total_answer_key_keystrokes_overall) *
                 100
               : 0;
+
+          // --- AUTO-UPDATE overall_completion_date if needed ---
+          // Only set if user has completed and passed all exams (score >= 90 and completed_at for each exam)
+          let shouldSetOverallCompletionDate = false;
+          let latestCompletionDate: string | null = null;
+          if (EXAMS_DATA.length > 0) {
+            const allCompletedAndPassed = EXAMS_DATA.every((exam) => {
+              const score = per_exam_scores[exam.id]?.score_percentage;
+              const completedAt = per_exam_scores[exam.id]?.completed_at;
+              return (
+                score !== undefined &&
+                score !== null &&
+                score >= 90 &&
+                !!completedAt
+              );
+            });
+            if (allCompletedAndPassed) {
+              // Find the latest completed_at among the exams
+              const dates = EXAMS_DATA.map(
+                (exam) => per_exam_scores[exam.id]?.completed_at
+              )
+                .filter(Boolean)
+                .map((d) => new Date(d as string));
+              if (dates.length === EXAMS_DATA.length) {
+                latestCompletionDate = new Date(
+                  Math.max(...dates.map((d) => d.getTime()))
+                ).toISOString();
+                shouldSetOverallCompletionDate = true;
+              }
+            }
+          }
+          // If DB value is missing and we should set it, update the DB
+          if (
+            !annotator.overall_completion_date &&
+            shouldSetOverallCompletionDate &&
+            latestCompletionDate
+          ) {
+            // Fire and forget, don't await
+            supabase
+              .from("annotators")
+              .update({ overall_completion_date: latestCompletionDate })
+              .eq("id", annotator.id)
+              .then(({ error }) => {
+                if (error) {
+                  console.error(
+                    "Failed to update overall_completion_date for annotator",
+                    annotator.id,
+                    error
+                  );
+                }
+              });
+          }
+
           return {
             id: annotator.id,
             liftapp_user_id: annotator.liftapp_user_id,
             created_at: annotator.created_at,
-            overall_completion_date: annotator.overall_completion_date,
+            overall_completion_date:
+              annotator.overall_completion_date ||
+              (shouldSetOverallCompletionDate && latestCompletionDate
+                ? latestCompletionDate
+                : null),
             total_images_attempted_overall,
             total_effective_user_keystrokes_overall,
             total_answer_key_keystrokes_overall,
