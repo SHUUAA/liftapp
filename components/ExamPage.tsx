@@ -621,7 +621,7 @@ const ExamPage: React.FC<ExamPageProps> = ({
                 setIsResultsModalOpen(false);
                 setIsReviewModalOpen(true);
               }}
-              className="w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:text-sm"
+              className="w-full inline-flex justify-center rounded-md border border-green-600 shadow-sm px-4 py-2 bg-green-600 text-base font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 sm:text-sm transition-colors"
             >
               Review Answers
             </button>
@@ -854,10 +854,14 @@ const ExamPage: React.FC<ExamPageProps> = ({
                     const answerKeyRow = answerKeyForReview[rowIdx];
                     return (
                       <tr key={row.id}>
-                        <td className="px-2 py-1 border-b font-semibold">Row {rowIdx + 1}</td>
+                        <td className="px-2 py-1 border-b font-semibold">
+                          Row {rowIdx + 1}
+                        </td>
                         {columnsForCurrentExam.map((col) => {
                           const userValue = row.cells[col.id] || "";
-                          const answerValue = answerKeyRow ? (answerKeyRow.cells[col.id] || "") : "";
+                          const answerValue = answerKeyRow
+                            ? answerKeyRow.cells[col.id] || ""
+                            : "";
                           // Only color if answer key exists for this row
                           let cellColor = "";
                           if (answerKeyRow) {
@@ -872,7 +876,11 @@ const ExamPage: React.FC<ExamPageProps> = ({
                               key={col.id}
                               className={`px-2 py-1 border-b whitespace-pre-line ${cellColor}`}
                             >
-                              {userValue === "" ? <span className="text-slate-400">(empty)</span> : userValue}
+                              {userValue === "" ? (
+                                <span className="text-slate-400">(empty)</span>
+                              ) : (
+                                userValue
+                              )}
                             </td>
                           );
                         })}
