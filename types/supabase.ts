@@ -1,5 +1,3 @@
-import { AnnotationCellData } from "../types";
-
 export type Json =
   | string
   | number
@@ -122,12 +120,6 @@ export interface Database {
             columns: ["exam_id"]
             referencedRelation: "exams"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "images_uploader_profile_id_fkey"
-            columns: ["uploader_profile_id"]
-            referencedRelation: "users"
-            referencedColumns: ["id"]
           }
         ]
       }
@@ -155,7 +147,7 @@ export interface Database {
           annotator_id: number
           image_id: number
           client_row_id: string
-          row_data: AnnotationCellData
+          row_data: { [key: string]: string | number }
           is_submitted: boolean
           admin_profile_id?: string | null
         }
@@ -164,7 +156,7 @@ export interface Database {
           annotator_id: number
           image_id: number
           client_row_id: string
-          row_data: AnnotationCellData
+          row_data: { [key: string]: string | number }
           is_submitted?: boolean
           admin_profile_id?: string | null
         }
@@ -173,17 +165,11 @@ export interface Database {
           annotator_id?: number
           image_id?: number
           client_row_id?: string
-          row_data?: AnnotationCellData
+          row_data?: { [key: string]: string | number }
           is_submitted?: boolean
           admin_profile_id?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "annotation_rows_admin_profile_id_fkey"
-            columns: ["admin_profile_id"]
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "annotation_rows_annotator_id_fkey"
             columns: ["annotator_id"]
@@ -203,30 +189,24 @@ export interface Database {
           id: number
           image_id: number
           admin_profile_id: string
-          row_data: AnnotationCellData
+          row_data: { [key: string]: string | number }
           client_row_id: string
         }
         Insert: {
           id?: number
           image_id: number
           admin_profile_id: string
-          row_data: AnnotationCellData
+          row_data: { [key: string]: string | number }
           client_row_id: string
         }
         Update: {
           id?: number
           image_id?: number
           admin_profile_id?: string
-          row_data?: AnnotationCellData
+          row_data?: { [key: string]: string | number }
           client_row_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "answer_key_rows_admin_profile_id_fkey"
-            columns: ["admin_profile_id"]
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "answer_key_rows_image_id_fkey"
             columns: ["image_id"]
