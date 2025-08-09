@@ -182,41 +182,47 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
     setIsLoadingAnnotators(true);
     dataFetchStatus.current.annotators = true;
     try {
-      const { data: annotators, error: annotatorsError } = await supabase
-        .from("annotators")
-        .select("id, liftapp_user_id, created_at, overall_completion_date");
-      if (annotatorsError) throw annotatorsError;
-      if (!annotators) {
+      // Fetch ALL annotators in batches
+      let allAnnotators: any[] = [];
+      let page = 0;
+      const PAGE_SIZE = 1000;
+      while (true) {
+        const { data: pageData, error: annotatorsError } = await supabase
+          .from("annotators")
+          .select("id, liftapp_user_id, created_at, overall_completion_date")
+          .order("id", { ascending: true })
+          .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        if (annotatorsError) throw annotatorsError;
+        if (pageData) allAnnotators.push(...pageData);
+        if (!pageData || pageData.length < PAGE_SIZE) break;
+        page++;
+      }
+      if (allAnnotators.length === 0) {
         setAllAnnotators([]);
         return;
       }
-      const { data: completions, error: completionsError } =
-        await (async () => {
-          let allRecords: any[] = [];
-          let page = 0;
-          const PAGE_SIZE = 1000;
-          const PAGE_SIZE = 5000;
-          while (true) {
-            const { data: pageData, error } = await supabase
-              .from("user_exam_completions")
-              .select(
-                `
-                annotator_id, exam_id, status, completed_at, retake_count, duration_seconds,
-                total_effective_keystrokes, total_answer_key_keystrokes, score_percentage,
-                exams ( exam_code, name )
-              `
-              )
-              .in("status", ["submitted", "timed_out"])
-              .order("completed_at", { ascending: false })
-              .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-            if (error) return { data: null, error };
-            if (pageData) allRecords.push(...pageData);
-            if (!pageData || pageData.length < PAGE_SIZE) break;
-            page++;
-          }
-          return { data: allRecords, error: null };
-        })();
-      if (completionsError) throw completionsError;
+      // Fetch ALL completions in batches
+      let allRecords: any[] = [];
+      page = 0;
+      while (true) {
+        const { data: pageData, error } = await supabase
+          .from("user_exam_completions")
+          .select(
+            `
+            annotator_id, exam_id, status, completed_at, retake_count, duration_seconds,
+            total_effective_keystrokes, total_answer_key_keystrokes, score_percentage,
+            exams ( exam_code, name )
+          `
+          )
+          .in("status", ["submitted", "timed_out"])
+          .order("completed_at", { ascending: false })
+          .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        if (error) return { data: null, error };
+        if (pageData) allRecords.push(...pageData);
+        if (!pageData || pageData.length < PAGE_SIZE) break;
+        page++;
+      }
+      const completions = allRecords;
       const completionsByAnnotator = new Map<number, any[]>();
       (completions || []).forEach((comp) => {
         if (!completionsByAnnotator.has(comp.annotator_id)) {
@@ -224,7 +230,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         }
         completionsByAnnotator.get(comp.annotator_id)!.push(comp);
       });
-      const processedAnnotators: AnnotatorInfo[] = annotators.map(
+      const processedAnnotators: AnnotatorInfo[] = allAnnotators.map(
         (annotator) => {
           const userCompletions =
             completionsByAnnotator.get(annotator.id) || [];
