@@ -195,6 +195,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           let allRecords: any[] = [];
           let page = 0;
           const PAGE_SIZE = 1000;
+          const PAGE_SIZE = 5000;
           while (true) {
             const { data: pageData, error } = await supabase
               .from("user_exam_completions")
